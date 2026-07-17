@@ -174,9 +174,9 @@ Stack any of these freely on top of a Primary structure. Multiple Modifiers per 
 
 35. **Duotone treatment** — two-color mapping of a photograph (e.g. deep navy shadows + warm cream highlights). Bake it into the source image; the native PPT route does not support a runtime duotone filter chain.
 
-36. **Drop shadow under image panel** — `<filter><feDropShadow dx dy stdDeviation flood-color flood-opacity/></filter>` applied to the image's container `<rect>` (or to the `<image>` itself). Standard depth lift.
+36. **Drop shadow under image panel** — `<filter><feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.10"/></filter>` applied to the image panel's backing `<rect>`. Standard depth lift; filters do not apply directly to `<image>` under the project contract.
 
-37. **Inner / outer glow on overlay shape** — `<filter><feGaussianBlur/><feMerge/></filter>` on a shape, or simply a slightly larger blurred `<rect>` underneath the target.
+37. **Inner / outer glow on overlay shape** — `<filter><feGaussianBlur stdDeviation="6"/><feMerge/></filter>` on a shape, or simply a slightly larger blurred `<rect>` underneath the target.
 
 ## Image as Texture / Atmosphere
 
@@ -247,7 +247,7 @@ Combine freely. The "AI-default" failure mode is the opposite: defaulting to bar
 
 **Skip-detection signal** — if every page's `Layout pattern` column resolves to bare #2 / #3 / #5 / #6 with no Modifier ids, the catalog was not consulted. Re-read and reconsider.
 
-**Cross-page through-line (recurring motif).** The patterns above are per-page, but a deck reads as *designed* when one illustration motif family recurs across pages — a cover anchor, section dividers repeating the motif for chapter identity (`#75`), and small `#63` spots from the same family threaded through the body. Keep them one family (shared rendering / palette / subject world), vary scale and placement, and never let the recurrence harden into a per-section quota. Planning lives in [strategist.md](./strategist.md) (deck illustration motif); generation mechanics split by role — hero / divider anchors: [image-generator.md](./image-generator.md) §4.1 primitives; body spot sheets: §4.3.
+**Cross-page through-line (recurring motif).** The patterns above are per-page, but a deck reads as *designed* when one illustration motif family recurs across pages—a cover anchor, section dividers repeating the motif (`#75`), and small `#63` spots threaded through the body. Keep one family (shared rendering / locked deck colors / subject world), vary scale and placement, and never turn recurrence into a quota.
 
 ## Hard Constraints
 

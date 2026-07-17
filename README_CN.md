@@ -1,4 +1,4 @@
-# PPT Master — AI 生成原生可编辑 PPTX，支持任意文档输入
+# PPT Master — AI 生成原生 PowerPoint，支持任意文档输入
 
 [![Version](https://img.shields.io/github/v/release/hugohe3/ppt-master?label=version&color=blue)](https://github.com/hugohe3/ppt-master/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -46,7 +46,7 @@
 
 </details>
 
-> **AI 生成 PPT，不是 AI 套模板。** PPT Master 是一套在 AI IDE（Claude Code / Cursor / VS Code + Copilot 等）里运行的工作流：把 PDF / DOCX / 网页等材料交给 AI，它在你本机生成一份真正的 PowerPoint——每个元素都能在 PowerPoint 里点开修改，数据不出本地，不锁定任何平台和模型。工作原理与能力边界 → [产品定位](#产品定位)。
+> **可编辑早已是及格线——真正拉开差距的是原生深度。** PPT Master 交给你的是一份真正的 PowerPoint：母版、原生形状、数据驱动的图表与表格，而不是一堆扁平文本框，也不是套模板填空的结果。它还不止把幻灯片排得好看——先替你把逻辑理顺，再谈视觉；而这份原生深度在**持续向 PowerPoint 本身靠拢**，逐版本补齐更多原生能力。形态上，它是一套在有 Agent 能力的 AI 工具里运行的工作流：把你的主题或材料交给 AI，就在你本机生成，数据不出本地，不锁定任何平台和模型。工作原理与能力边界 → [产品定位](#产品定位)。
 
 <p align="center">
   <a href="https://hugohe3.github.io/ppt-master/"><strong>在线预览</strong></a> ·
@@ -104,26 +104,25 @@
 
 ---
 
-丢进原材料，拿回的这份 PPT **不只是能改**：它有 PPT 原生转场，也支持按需开启的入场动画（默认关闭），演讲者备注能直接合成音频旁白，图表和表格还能以带数据的 PowerPoint 原生对象形式导出，也能参考你自己的 PPT 模板来设计——一份能直接拿去讲、回头还能改的成品。每项能力怎么用 → [快速入门](./docs/zh/getting-started.md)。
+丢进原材料，拿回的不是一张能改的静态版面，而是**一份带完整 PowerPoint 行为的成品**：原生页间转场、可按需开启的入场动画（默认关闭）、演讲者备注一键合成音频旁白乃至视频、图表和表格可作为带数据的原生对象导出，也能沿用你自己的 PPT 模板来设计——直接拿去讲，回头还能接着改。每项能力怎么用 → [快速入门](./docs/zh/getting-started.md)。
 
 ## 产品定位
 
-**一个文件如果在 PowerPoint 里打不开、改不动，就不该被叫做 PPT。** 市面上的 AI PPT 工具大致分四类，PPT Master 只做最后一类：
+**可编辑如今只是及格线——真正要紧的是你能拿到多少 PowerPoint。** PPT Master 交付的是 PowerPoint 的原生对象模型本身，而且有深度：带调节手柄的原生形状与连接符、按需的数据驱动图表与表格、完整的文本 / 图片 / 填充 / 效果，点开任意元素都作为原生 PowerPoint 对象继续编辑；走模板 / 结构化路线时，它还能为你产出带真正母版与版式（`p:sldMaster` / `p:sldLayout` 继承）的 deck。
 
-| 类型 | 产物形态 | 能在 PowerPoint 里逐元素改吗 |
-|---|---|:---:|
-| 模板填空 | 套模板的 PPTX | 部分可以，受模板限制 |
-| 图片式 | 一页一张大图拼成 PPTX | ❌ 整页是图片 |
-| HTML 演示 | 网页演示 | ❌ 不是 PPTX |
-| **原生可编辑（PPT Master）** | **真 DrawingML 形状、文本框、图表** | ✅ 每个元素都能点开改 |
+而且这份深度是**一个前进方向，不是一张固定清单。** PPT Master 的北极星是持续向 PowerPoint 本身靠拢：不断开发、集成更多 PowerPoint 原生能力，一个版本接一个版本，缩小「AI 能替你生成的」和「你在 PowerPoint 里手工能做出的」之间的差距。[PowerPoint ↔ SVG 映射指南](./docs/zh/powerpoint-svg-mapping.md) 逐条、诚实地记录了这份能力今天覆盖到哪——SmartArt 是刻意的排除，不是缺口。
 
-形态上，它不是网站也不是 App，而是一套在 AI IDE（Claude Code / Cursor / VS Code + Copilot / Codebuddy 等）里运行的工作流（一个 "skill"）：你在 IDE 的对话框里说"用这份 PDF 做一份 PPT"，AI 按这套工作流在你本机生成真正可编辑的 `.pptx`。你不写任何代码，要做的只有三件事——装 Python、装一个 AI IDE、把资料放进来。
+形态上，它是一套在有 Agent 能力的 AI 工具里运行的工作流（一个 "skill"）：你在对话框里说"用这份 PDF 做一份 PPT"，它就按流程在你本机生成、导出原生可编辑的 `.pptx`。你不写任何代码，只做三件事——装 Python、装一个 AI 工具、把材料放进来。
 
-这个形态换来三个别的工具很难同时给出的承诺：
+从源材料生成新 deck 是主管线，但不是唯一路线：PPT Master 还能从你的参考资料中提炼可复用的品牌 / 版式 / 成品模板，把新内容填进你已有的 `.pptx` 并保留其设计，或为成品 deck 追加原生转场、动画和旁白——每条路线都有明确的保留契约。
 
-- **成本透明可控** — 工具免费开源，唯一成本是你自己的 AI 模型用量，你用多少付多少，不在此之外增加任何订阅费用
-- **数据不出本地** — 你的文件不应该为了做一份 PPT 就被上传到别人的服务器。除与 AI 模型的对话外，全流程在你的电脑上完成
-- **不锁定平台** — 你的工作流不应该被任何一家公司绑架。Claude Code、Cursor、VS Code Copilot 等均可驱动；Claude、GPT、Gemini、Kimi 等模型均可使用
+在这份原生深度之上，这个形态还带来三个承诺：
+
+- **成本透明可控** — 工具免费开源，唯一成本是你自己的 AI 模型用量，不在此之外增加任何订阅费用
+- **数据不出本地** — 除与 AI 模型的对话外，全流程在你的电脑上完成
+- **不锁定平台** — 任何具备 agent 能力的 AI IDE 均可驱动；Claude、GPT、Gemini、Kimi 等模型均可使用
+
+为什么选它、以及它不适合的场景 → [为什么选 PPT Master](./docs/zh/why-ppt-master.md)；这些承诺背后的长期能力边界 → [项目定位与能力边界](./docs/zh/project-positioning.md)。
 
 > [!IMPORTANT]
 > ### 这是一个工具，不是一个许愿池
@@ -363,7 +362,8 @@ PPT Master 会优先读取当前进程环境变量，然后按顺序读取第一
 | | 文档 | 说明 |
 |---|------|------|
 | 📘 | [快速入门](./docs/zh/getting-started.md) | 三步做出第一份 deck，外加模板、实时预览、动画、旁白、声音复刻的用法（**新用户从这里开始**） |
-| 🆚 | [为什么选 PPT Master](./docs/zh/why-ppt-master.md) | 与 Gamma、Copilot 等工具的对比 |
+| 🆚 | [为什么选 PPT Master](./docs/zh/why-ppt-master.md) | 为什么选它、以及它不适合的场景 |
+| 🧭 | [项目定位与能力边界](./docs/zh/project-positioning.md) | 长期定位、产品承诺与能力边界 |
 | 🪟 | [Windows 安装指南](./docs/zh/windows-installation.md) | Windows 用户手把手安装教程 |
 | 📖 | [SKILL.md](./skills/ppt-master/SKILL.md) | 核心流程与规则 |
 | 📐 | [画布格式](./skills/ppt-master/references/canvas-formats.md) | PPT 16:9、小红书、朋友圈等 10+ 种格式 |
@@ -371,6 +371,8 @@ PPT Master 会优先读取当前进程环境变量，然后按顺序读取第一
 | 💼 | [示例](./examples/README.md) | 所有示例项目 |
 | 🏗️ | [技术路线](./docs/zh/technical-design.md) | 架构、设计哲学、为什么选 SVG |
 | ❓ | [常见问题](./docs/zh/faq.md) | 模型选择、费用、排版问题排查、自定义模板 |
+
+<sub>完整文档索引 → [`docs/zh/`](./docs/zh/README.md)</sub>
 
 ---
 
@@ -396,18 +398,6 @@ PPT Master 会优先读取当前进程环境变量，然后按顺序读取第一
 
 - 💬 **提问与分享** — [GitHub Discussions](https://github.com/hugohe3/ppt-master/discussions)
 - 🐛 **Bug 反馈与功能建议** — [GitHub Issues](https://github.com/hugohe3/ppt-master/issues)
-
----
-
-## Star History
-
-<a href="https://star-history.com/#hugohe3/ppt-master&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=hugohe3/ppt-master&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=hugohe3/ppt-master&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=hugohe3/ppt-master&type=Date" />
- </picture>
-</a>
 
 ---
 
@@ -443,4 +433,4 @@ Made with ❤️ by [何雨果 Hugo He](https://www.hehugo.com/) — 如果这�
 
 <sub>官方发布渠道：<a href="https://github.com/hugohe3/ppt-master">GitHub</a>（主仓库）· <a href="https://atomgit.com/hugohe3/ppt-master">AtomGit</a>（镜像）。其他平台转发版本均为非官方版本。MIT 协议，使用需保留署名。</sub>
 
-[⬆ 回到顶部](#ppt-master--ai-生成原生可编辑-pptx支持任意文档输入)
+[⬆ 回到顶部](#ppt-master--ai-生成原生-powerpoint支持任意文档输入)

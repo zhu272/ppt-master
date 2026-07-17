@@ -2,7 +2,10 @@
 
 This directory holds **brand-only templates**: identity bundles (color / typography / logo / voice / icon style) without an SVG page roster. Strategist locks the brand's identity segment as truth; Executor designs pages freely under those constraints.
 
-Brand is one of three template kinds in the library — alongside [`layouts/`](../layouts/) (structure-only) and [`decks/`](../decks/) (complete identity + structure). Full data model: [`docs/zh/templates-architecture.md`](../../../../docs/zh/templates-architecture.md).
+Brand is one of three template kinds in the library — alongside
+[`layouts/`](../layouts/) (brand-neutral structure) and [`decks/`](../decks/)
+(a recurring application with integrated identity and structure). The shared
+kind and workspace model lives in the parent [`README.md`](../README.md).
 
 ## How brands are consumed
 
@@ -13,18 +16,18 @@ Brand application follows the **same explicit-path rule and workspace routing as
 | An explicit brand workspace path (e.g. `templates/brands/anthropic/`) | Resolve `templates/design_spec.md`; stage `templates/` plus any existing `images/` and `icons/` into the matching project directories; Strategist locks the identity segment |
 | Bare brand name only ("use anthropic brand"), brand mention without path, or silence | Skip — same mechanical rule as all template kinds: bare names never trigger |
 | Brand path + layout path | Fuse into one `design_spec.md` — brand owns identity segment (color / typography / logo / voice / icon style); layout owns structure segment (canvas / page roster). See `SKILL.md` Step 3. |
-| Brand path + deck path | Fuse — brand identity overrides deck identity; structure + middle segments come from deck |
-| Brand path + layout path + deck path | Three-way fuse — brand=identity, layout=structure, deck=middle |
+| Brand path + deck path | Fuse — brand identity overrides deck identity; structure + application segments come from deck |
+| Brand path + layout path + deck path | Three-way fuse — brand=identity, layout=structure, deck=application, subject to application/structure compatibility |
 | Two brand paths | Conflict resolution prompt before fusion — user picks per-segment source |
 
 `brands_index.json` is discovery-only; listing brands never advances the pipeline.
 
 ## Creating a new brand
 
-Run the standalone workflow:
+Enter the fixed Create Template route, which dispatches the Create Brand child workflow:
 
 ```
-Read skills/ppt-master/workflows/create-brand.md
+Read skills/ppt-master/workflows/create-template.md, which dispatches `kind: brand` to skills/ppt-master/workflows/create-template/create-brand.md
 ```
 
 Three input paths are supported: brand asset (logo / brand site URL / branded PPTX / brand PDF), verbal spec dictated in chat, or empty skeleton for the user to fill in later.

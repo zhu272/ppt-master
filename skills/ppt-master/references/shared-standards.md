@@ -28,7 +28,7 @@ Other files link here instead of restating its contracts.
 | Text treatments | Mixed runs, tracking, underline, strikethrough, gradient fill, outline, transparency, watermark text, and text glow | §4.2, §6.7 |
 | Transforms and composition | Translate, scale, rotate, mirror, supported matrix composition, layering, and static local reuse | §1.3, §6.8 |
 | Freeform geometry | Full SVG path vocabulary, curves, organic containers, multi-subpaths, and asymmetric rounded rectangles | §6.9 |
-| Imported PowerPoint shapes | Lossless import payload, lightweight inspection projection, and selective restoration of preset/custom geometry, connectors, and unchanged native text bodies | §1.4 |
+| Imported PowerPoint shapes | Immutable lossless payload backing, editable authoring IR, and selective rehydration of preset/custom geometry, connectors, and unchanged native text bodies | §1.4 |
 | Authored PowerPoint preset shapes | Registry-generated visible fragments that export as one native preset shape or connector | §1.5; [`native-shape-authoring.md`](./native-shape-authoring.md) |
 | Radial/chart geometry | Pie/donut arcs, dashed-circle ring segments, gauges, progress rings, sunbursts, and diagonal polygon arrowheads | §6.10 |
 | Constructed visual styles | Faux glass, hand-drawn marks, ink wash, Riso offset, pixel grid, halftone, isometric facets, paper cut, and line-plus-area data treatment | §6.11 |
@@ -167,39 +167,50 @@ when the referenced marker fits this native-arrow contract:
 | Concern | Required form |
 |---|---|
 | Reference | Exact local `url(#id)` to a `<marker>` in `<defs>` |
-| Orientation | `orient="auto"` |
-| Shape | A 3-vertex `<polygon>` / closed M/L-only path (triangle), 4-vertex `<polygon>` / closed M/L-only path (diamond), or one `<circle>` / `<ellipse>` (oval) |
-| Path grammar | One explicit `M`/`L` command per vertex followed by `Z`; do not use `H`, `V`, curves, or an implicit multi-point `L` command inside a marker path |
-| Color parity | Marker fill matches the parent line stroke; DrawingML arrows inherit the line color |
+| Orientation | `orient="auto"` or `orient="auto-start-reverse"`; the latter reverses `marker-start` while behaving like `auto` at `marker-end` |
+| Shape | One direct shape representing a DrawingML `triangle`, `stealth`, `arrow`, `diamond`, or `oval` line end: a 3-vertex `<polygon>` / closed path (triangle), a simple concave 4-vertex `<polygon>` / closed path (stealth), an open 3-vertex path (arrow), a simple convex 4-vertex `<polygon>` / closed path (diamond), or one `<circle>` / `<ellipse>` (oval) |
+| Path grammar | Use one explicit `M`/`L` command per vertex. Triangle, stealth, and diamond paths end in `Z`; arrow paths remain open after the third vertex. Do not use `H`, `V`, curves, or an implicit multi-point `L` command inside a marker path |
+| Color parity | Triangle, stealth, diamond, and oval use a fill matching the parent line stroke. The open arrow uses `fill="none"` and a stroke matching the parent line stroke. DrawingML line ends inherit the line color |
 
-The converter maps the three shapes to DrawingML triangle, diamond, and oval
-line ends. Prefer `<polygon>` for triangle/diamond markers because the vertex
-count is unambiguous. Other marker shapes do not have a native mapping and are
-dropped with a warning.
+The converter maps these five shapes to their corresponding DrawingML line-end
+types. Prefer `<polygon>` for the closed triangle, stealth, and diamond forms;
+the open arrow form requires `<path>`. Four-vertex shapes must be simple and
+non-degenerate: convex geometry maps to diamond and concave geometry maps to
+stealth. Checker and exporter preflight consume this same contract; other
+marker shapes have no native mapping and block export instead of being silently
+dropped.
+
+PPTX import compatibility, tolerant recovery, strict-mode rejection, and
+diagnostic behavior are indexed in
+[`conversion.md`](../scripts/docs/conversion.md#import-compatibility-and-recovery-boundary).
 
 ---
 
 ### 1.2 Image Clipping (Conditional Contract)
 
-`clip-path` has a native picture-geometry mapping only on `<image>` elements and
-only under this contract:
+`clip-path` has a native picture-geometry mapping only on SVG-namespace
+`<image>` elements (plus the exact imported crop wrapper defined under Images)
+and only under this contract:
 
 | Concern | Required form |
 |---|---|
-| `<clipPath>` element defined inside `<defs>` | Converter looks up clip defs via id index |
-| Contains a **single supported** shape child | The converter uses the first supported child; multiple shapes are not composited |
-| Shape is one of: `<circle>`, `<ellipse>`, `<rect>` (with rx/ry), `<path>`, `<polygon>` | These map to DrawingML geometry (preset or custom) |
-| Used **only on `<image>` elements** | Non-image elements with clip-path are **forbidden** |
+| SVG-namespace `<clipPath>` defined inside `<defs>` | Converter looks up one exact local id; missing, duplicate, foreign-namespace, or malformed references fail |
+| Contains exactly one direct SVG-namespace supported shape child | Multiple shapes are not composited |
+| Shape is one of: `<circle>`, `<ellipse>`, `<rect>` (optional rx/ry), `<path>`, `<polygon>` | These map to DrawingML geometry (preset or custom) |
+| No `clip-rule` or `fill-rule`, whether direct or in inline `style` | DrawingML picture geometry has no equivalent winding-rule control |
+| Used only on `<image>` or an exact imported crop wrapper | Shapes, groups, text, and generalized nested SVG targets are **forbidden** |
 
 | SVG clip shape | DrawingML output |
 |---|---|
-| `<circle>` / `<ellipse>` | Full-frame `<a:prstGeom prst="ellipse"/>`; child center/radii are not preserved |
-| `<rect rx="..."/>` | Full-frame `<a:prstGeom prst="roundRect"/>` with one radius adjustment; child x/y/width/height are not preserved |
+| `<circle>` / `<ellipse>` | Full-frame `<a:prstGeom prst="ellipse"/>`; the child must exactly cover the image frame. A `userSpaceOnUse` circle requires a square physical frame; a normalized `objectBoundingBox` circle may fill any frame |
+| `<rect>` / `<rect rx="..."/>` | A plain full-frame rect is a compatible no-op; rounded form maps to full-frame `<a:prstGeom prst="roundRect"/>` with one physical radius adjustment. The rect must exactly cover the image frame and cannot express non-uniform physical corner radii |
 | `<path>` / `<polygon>` | `<a:custGeom>` with coordinates mapped into the image frame |
 
 `clip-path` on shapes, groups, or text is forbidden; author the target geometry
 directly instead. Use a path/polygon clip when the intended contour does not
-cover the full picture frame.
+cover the full picture frame. A contour that depends on even-odd or another
+explicit winding rule is outside this mapping and must be rebuilt as one
+unambiguous visible contour or pre-rendered.
 
 ---
 
@@ -256,32 +267,69 @@ the original `<use>` / `<symbol>` structure.
 `pptx_to_svg.py` emits rendering-neutral metadata when a visible SVG object
 originates from `p:sp`, `p:cxnSp`, or `p:grpSp`. This contract is for lossless
 import SVGs and unchanged imported objects that remain Slide-local or inside a
-slot during mirror restoration. Ordinary authored SVG does not need these
+slot during mirror materialization. Ordinary authored SVG does not need these
 attributes, and no separate source-payload opt-in marker exists.
 
 | Metadata | Placement | Required behavior |
 |---|---|---|
 | `data-pptx-object` | Logical `<g>` and native carrier | `shape`, `connector`, `group`, or `picture`; never infer the object kind from path appearance. |
-| `data-pptx-shape-id` + `data-pptx-shape-scope` | Logical `<g>` and carrier | Preserve the source part-scoped identity. Export remaps duplicate Master/Layout/Slide ids into page-unique ids before restoring connector references. |
-| `data-pptx-frame="x y width height"` | Logical `<g>` and carrier | Own native `a:xfrm` position and size. Values use sufficient precision for exact EMU recovery; path bounds, stroke, markers, shadows, and text glyph bounds never replace this frame. |
+| `data-pptx-shape-id` + `data-pptx-shape-scope` | Logical `<g>` and carrier | Preserve the source part-scoped identity. Export remaps duplicate Master/Layout/Slide ids into page-unique ids before rebinding connector references. |
+| `data-pptx-frame="x y width height"` | Logical `<g>` and carrier | Own native `a:xfrm` position and size. Lossless import SVGs and tool-side native records use sufficient precision for exact EMU recovery; the model-facing authoring IR may use the compact page-coordinate spelling defined below. Path bounds, stroke, markers, shadows, and text glyph bounds never replace this frame. |
 | `data-pptx-prst` | Preset carrier and logical `<g>` | One of the locked 187 DrawingML `ST_ShapeType` values. |
 | `data-pptx-av-*` | Preset carrier and logical `<g>` | Preserve the complete validated DrawingML adjustment formula, including non-`val` formulas. |
 | `data-pptx-part="geometry"` | One hidden carrier path | The single native export authority for frame, base fill/line/effect, preset/custom geometry, and object identity. |
-| `data-pptx-part="geometry-preview"` / `geometry-detail` | Visible preview group/paths | Render the preset's independent path fill/stroke layers. These elements are never emitted as duplicate PowerPoint shapes. |
-| `data-pptx-preview-sha256` | Logical preset `<g>` and carrier | Detect edits to visible preset paths or paint. A stale preview fails quality check/export instead of silently restoring old native metadata. |
-| `data-pptx-geometry-kind="custom"` + `data-pptx-custgeom` | Custom-geometry carrier | Preserve the validated original `a:custGeom` subtree. If the visible path hash is unchanged, export restores formulas, handles, connection sites, text rectangle, and path list exactly; edited paths compile from current SVG geometry. |
+| `data-pptx-part="geometry-preview"` / `geometry-detail` | Visible preview group/paths | Render the preset's independent path fill/stroke layers. A hash-locked preview group may mirror the carrier's one filter so a multi-path preset renders one aggregate imported effect; these elements are never emitted as duplicate PowerPoint shapes. |
+| `data-pptx-preview-sha256` | Logical preset `<g>` and carrier | Detect edits to visible preset paths or paint. A stale preview fails quality check/export instead of silently reusing old native metadata. |
+| `data-pptx-geometry-kind="custom"` + `data-pptx-custgeom` or `data-pptx-custgeom-ref` | Custom-geometry carrier | Preserve the validated original `a:custGeom` subtree. If the visible path hash is unchanged, export writes formulas, handles, connection sites, text rectangle, and path list exactly; edited paths compile from current SVG geometry. |
 | `data-pptx-start/end-shape-id/site` | Connector logical `<g>` and carrier | Restore `a:stCxn` / `a:endCxn` after scoped shape-id allocation. A connector may retain one zero frame axis; it must not be expanded from visible stroke or marker bounds. |
-| `data-pptx-shape-style` | Native carrier | Preserve a relationship-free `p:style` independently of text, including shapes with no visible text. |
-| `metadata[data-pptx-part="txbody"]` | Logical shape `<g>` | Preserve unchanged `p:txBody`, including an empty text body. Content, whitespace, positioning, or visible typography edits invalidate the payload and use the normal SVG text fallback. |
+| `data-pptx-shape-style` or `data-pptx-shape-style-ref` | Native carrier | Preserve a relationship-free `p:style` independently of text, including shapes with no visible text. |
+| `data-pptx-effect-status="unsupported"` + `data-pptx-effect-reason` | Imported `p:sp` / `p:cxnSp` logical object and native carrier; imported `p:pic` carrier and logical object; imported `p:grpSp` logical group; imported table `p:graphicFrame` logical group | Record why an encountered source object or text-run `effectLst` / `effectDag` cannot enter the registered target-specific effect mapping without changing semantics. Checker and export stop with the recorded reason; these attributes are diagnostics, not a preserved effect payload or authoring syntax. |
+| `metadata[data-pptx-part="txbody"]` with inline Base64 or `data-pptx-ref` | Logical shape `<g>` | Preserve unchanged `p:txBody`, including an empty text body. Content, whitespace, positioning, visible typography, or incompatible child-topology edits invalidate the payload. A source payload with run-level effects then blocks checker/export instead of losing those effects; an effect-free payload uses the normal SVG text fallback. |
+
+**Hard rule — compact native metadata transport**: Type A mirror
+materialization moves `p:txBody`, relationship-free `p:style`, and
+`a:custGeom` payloads into the content-addressed
+`templates/native_payloads.json.gz` store. It also deduplicates repeated native
+restoration fields—object identity, frame, preset/custom-geometry guards,
+preview/text hashes, connector endpoints, payload references, and adjustment
+formulas—into short `data-pptx-native-ref` records in the same store. Checker,
+template-structure validation, and export validate and hydrate both layers in
+memory. Keep Master/Layout, placeholder, layer, editable-object, diagnostic,
+and editable chart/table metadata inline. Legacy inline Base64 and v1
+payload-only stores remain readable.
+
+One effect reason remains its existing plain token. If one imported object has
+multiple independent unsupported reasons, both marker copies store the same
+deduplicated, lexicographically sorted compact JSON string array in
+`data-pptx-effect-reason`; adding a later reason must not overwrite an earlier
+one. This array is still diagnostic metadata, not an authoring surface.
 
 **Import/authoring representation split**:
 
 | Representation | Contract |
 |---|---|
-| Lossless import SVG | Keep complete native payload, hidden carriers, and preview evidence in the temporary analysis workspace. This is the round-trip source, not the model-facing authored page. |
-| Lightweight authoring projection | Exclude opaque payload and duplicate hidden carriers from model context while retaining visible shape intent and logical ids needed to locate an adopted object in the lossless import. It is not an export source. |
+| Lossless import SVG | Keep complete native payload, hidden carriers, and preview evidence in the temporary analysis workspace. It is immutable native-payload backing, not the editable template source. |
+| Authoring IR bundle | Keep editable SVGs plus model-readable `authoring_summary.json` and tool-only `authoring_manifest.json`. Exclude opaque payload and duplicate hidden carriers from model context while retaining visible shape intent and a stable document-local `data-pptx-source-ref` on each imported logical object. Compact model-facing imported frames and safe transform page coordinates to at most two decimals before hashing the IR. The summary owns the compact current-file index; the manifest owns source paths and initial hashes and never enters model context. |
 | `standard` / `fidelity` output | Use the compact authored-preset contract (§1.5) for newly authored stock shapes; do not transplant opaque import payload or source topology. |
-| `mirror` output | Keep the expanded lossless representation and supported imported metadata only on unchanged Slide-local/slot objects. Expand fixed Master/Layout group wrappers into direct semantic atoms while preserving source ownership, paint order, and visible appearance. |
+| `mirror` output | Materialize from the edited authoring IR. Rehydrate supported imported metadata only when a Slide-local/slot object's source ref and initial authoring hash still match; otherwise keep the current SVG fallback. Expand fixed Master/Layout group wrappers into direct semantic atoms while preserving source ownership, paint order, and visible appearance. |
+
+**Hard rule — model-facing page-coordinate precision**:
+
+| Surface | Precision contract |
+|---|---|
+| Imported `data-pptx-frame` in authoring IR | At most two decimals. An unchanged mirror source ref recovers the exact lossless frame before tool-side native-record externalization. |
+| `data-pptx-placeholder-bounds` in final template SVG | At most two decimals. |
+| `translate(...)`, `rotate(... cx cy)`, and `matrix(... e f)` | Translation values and rotation centers use at most two decimals. Keep the rotation angle and matrix `a b c d` coefficients unchanged. |
+| Protected values | Do not apply this compaction to path/points geometry, normalized crop or nested `viewBox` ratios, gradient offsets, opacity, scale arguments, canonical authored-preset frames, or lossless/tool-side native frames. |
+
+**Hard rule — authoring source refs**: `data-pptx-source-ref` is reserved for
+the create-template authoring IR. Its value is unique within one authoring SVG,
+not across the workspace, and must be resolved through that document's
+`authoring_manifest.json` record by the owning tool. Models MUST NOT read that
+machine manifest. Moving a referenced subtree into
+`icons/imported/` for readability must preserve the attribute and record it in
+the vector inventory; re-inlining re-establishes the same mapping. Final materialized
+template SVGs and normal project `svg_output/` must not contain this attribute.
 
 **Hard rule — structural-layer boundary**: An unchanged imported logical object
 may keep currently supported metadata while it remains Slide-local or inside a
@@ -294,10 +342,10 @@ to exactly one native shape/connector. Do not use this normalization to change
 ownership or appearance.
 
 **Hard rule — selective payload**: Do not copy every imported metadata block into
-an authored template. Keep the full lossless import SVG separately as the
-audit/fallback source. Mirror may reuse only metadata already supported by the
-converter on unchanged Slide-local/slot objects; unsupported or edited objects
-use the current SVG fallback. `data-pptx-replace-with` remains reserved for the
+an authored template. Keep the full lossless import SVG separately as immutable
+audit/fallback backing. Mirror may reuse only metadata already supported by the
+converter on source-ref/hash-matching Slide-local/slot objects; unsupported or
+edited objects use the current SVG fallback. `data-pptx-replace-with` remains reserved for the
 optional PowerPoint-native Chart/Table replacement contract.
 
 **Registry and rendering rules**:
@@ -319,7 +367,7 @@ optional PowerPoint-native Chart/Table replacement contract.
 - Opaque XML payloads containing any `r:*` relationship attribute are never
   copied into a new slide part. Relationship-bearing text content and
   shape-level `a:blipFill` use the existing rebuilt visual fallback and are
-  not covered by atomic `p:sp + p:txBody` restoration.
+  not covered by atomic `p:sp + p:txBody` rehydration.
 - Unknown future presets and explicit `unsupported` geometry status never
   downgrade silently to `rect`; native export stops with the recorded reason.
 
@@ -514,11 +562,24 @@ continue without modification.
 
 ### 4.1 Semantic SVG Marker Contract
 
-Semantic markers are minimal compiler hints orthogonal to native SVG semantics. Free-design and brand-only pages use flat export, declare one canonical root `data-pptx-page-role` (`cover` / `toc` / `section` / `content` / `ending`), and omit Master/Layout/layer/placeholder markers. On deck/layout template routes, root Master/Layout identity, atomic layer elements, grouped slots, and native-object metadata are authoritative and read first; each page carries its final structured contract from the start of SVG authoring and omits `data-pptx-page-role`. Add `data-pptx-role` only when no specialized marker expresses the required page-frame behavior; the element also uses a stable unique `id`. Do not classify ordinary page content or move visible facts out of SVG attributes/text into metadata. See [`semantic-svg.md`](semantic-svg.md) for the canonical vocabulary and examples.
+Semantic markers are minimal compiler hints orthogonal to native SVG semantics. Free-design, brand-only, and `template_reuse_scope: style` pages use flat export, declare one canonical root `data-pptx-page-role` (`cover` / `toc` / `section` / `content` / `ending`), and omit Master/Layout/layer/placeholder markers. On `template_reuse_scope: mirror|layout` routes, root Master/Layout identity, atomic layer elements, grouped slots, and native-object metadata are authoritative and read first; each page carries its final structured contract from the start of SVG authoring and omits `data-pptx-page-role`. Add `data-pptx-role` only when no specialized marker expresses the required page-frame behavior; the element also uses a stable unique `id`. Do not classify ordinary page content or move visible facts out of SVG attributes/text into metadata. See [`semantic-svg.md`](semantic-svg.md) for the canonical vocabulary and examples.
 
-- **Canvas authority**: `viewBox` MUST match the selected canvas dimensions.
-  Root `width` and `height` are optional and do not override it. Root `<svg>`
-  `transform` is forbidden; apply transforms to child elements or groups.
+- **Canvas authority**: New authoring writes the root canvas exactly as
+  `viewBox="0 0 W H"`, using single spaces and positive ordinary-decimal integer
+  pixels from the selected project/template lock. Numerically identical SVG
+  spellings (integral decimals, exponent or leading-plus notation, and comma
+  separators) are compatible input and receive a normalization warning.
+  Positive fractional dimensions are also read-compatible for custom slide
+  sizes reconstructed from PPTX; export quantizes them once at
+  `1 SVG px = 9,525 EMU`. Missing/malformed/non-finite values, a non-zero
+  origin, non-positive dimensions, or dimensions outside PowerPoint's supported
+  slide-size range are errors. Every public page and internal Layout prototype
+  in one build MUST use the same numeric canvas and match `spec_lock.md`
+  `canvas.viewBox`; standalone templates match `design_spec.md`
+  `canvas_viewbox`. Root `width` and `height` are optional and do not override
+  the `viewBox`. Root `<svg>` `transform` is forbidden; apply transforms to
+  child elements or groups. This root-page rule does not replace the separate
+  nested-crop and `<symbol viewBox>` contracts.
 - **Font portability**: font families used by the deck must resolve to installed
   export faces. `@font-face` remains forbidden; the typography contract lives in
   [`strategist.md §g`](strategist.md).
@@ -543,9 +604,9 @@ These forms are needed only when the stated PPT behavior matters:
 
 ### 4.3 Element Grouping (Mandatory)
 
-Wrap logically related Slide-local elements in top-level `<g id="...">` groups. This is **required on every generated page**, not an optional convenience: it produces real PowerPoint groups in the exported PPTX and gives each content unit a stable animation anchor. Plain `<g>` is the grouping primitive; keep alpha on individual descendants per §2.2. Flat free-design/brand-only pages use only ordinary semantic groups. On structured template pages, direct atomic Master/Layout elements are the required exception and a top-level slot `<g>` is already a semantic group.
+Wrap logically related Slide-local elements in top-level `<g id="...">` groups. This is **required on every generated page**, not an optional convenience: it produces real PowerPoint groups in the exported PPTX and gives each content unit a stable animation anchor. Plain `<g>` is the grouping primitive; keep alpha on individual descendants per §2.2. Flat free-design/brand-only pages use only ordinary semantic groups. On structured template pages, direct atomic Master/Layout elements are the required exception and a top-level slot `<g>` is already a semantic group. Nested implementation groups inside one named content unit may remain anonymous unless another specialized contract requires an id; they are not independent animation targets.
 
-**Semantic-group rule**: direct Slide content uses semantic groups. Aim for **3–8 ordinary top-level content `<g id>` groups per slide**; on structured template pages, slot groups and atomic Master/Layout objects are excluded. Each ordinary group becomes one entrance step under the chosen animation trigger. Leaving Slide-local titles, body lines, list items, cards, or decorative clusters as ungrouped top-level atoms is a contract violation.
+**Semantic-group rule**: direct Slide content uses semantic groups. Aim for **3–8 ordinary top-level content `<g id>` groups per slide**; on structured template pages, slot groups and atomic Master/Layout objects are excluded. Each ordinary group becomes one entrance step under the chosen animation trigger. Leaving Slide-local titles, body lines, list items, cards, or decorative clusters as ungrouped top-level atoms is an authoring-contract violation reported as an aggregate Checker warning.
 
 **Structural atoms and slots are excluded automatically.** `data-pptx-layer` and `data-pptx-placeholder` semantics are read first; otherwise explicit `data-pptx-role` values (`background`, `decoration`, `header`, `footer`, `chrome`, `watermark`, `page-number`, `logo`) mark Slide-local static framing (§4.1, [`semantic-svg.md`](semantic-svg.md)). A normal slot group has exactly one direct compatible carrier; several drawing atoms require the explicit composite `object` proxy fallback. Native chart/table carrier groups retain their specialized §7 contract.
 
@@ -569,11 +630,11 @@ separate parent content group; never put them inside the preset group itself.
 **Forbidden**:
 
 - One giant `<g>` around the whole slide (collapses to a single animation step).
-- Many ungrouped Slide-local `<rect>` / `<text>` / `<path>` atoms — fallback animation caps at 8 primitives, dense pages may skip animation, and selection/editing degrades.
+- Many ungrouped Slide-local `<rect>` / `<text>` / `<path>` atoms — they have no stable sidecar target and selection/editing degrades. Primitive fallback applies only when the root contains no top-level `<g>` at all; it is capped at 8 visible primitives.
 - One group per icon / text line / mark (too many steps).
 - Anonymous top-level groups — every top-level semantic group needs a descriptive `id`.
 
-**Naming — required.** A descriptive `id` on every top-level content `<g>` (`card-1`, `step-discover`, `header`, `footer`) is mandatory; it is the animation anchor and the group identity in PPTX. Without it, the exporter falls back to at most 8 top-level primitives or skips animation on dense pages.
+**Naming — required.** A descriptive, page-unique `id` on every top-level content `<g>` (`card-1`, `step-discover`, `header`, `footer`) is mandatory; it is the stable SVG-side animation and trace anchor. An anonymous top-level group still converts, but `animations.json` cannot reference it; an anonymous one-child implementation wrapper may also flatten. Primitive fallback is unrelated and applies only to roots with no top-level groups.
 
 ```xml
 <g id="card-benefits-1">
@@ -677,6 +738,11 @@ preflight; neither substitutes an opaque default for unknown intent.
 plus alpha when a painted transparent layer must remain represented. Prefer
 descendant alpha over group opacity when isolated compositing matters (§2.2).
 
+PPTX import is a user-input boundary, not generated authoring. Tolerant mode
+retains recognized color semantics, omits only unsupported paint properties,
+and records the decision in `conversion-report.json`; `--strict` keeps the
+closed parser checks. See
+[`conversion.md`](../scripts/docs/conversion.md#import-compatibility-and-recovery-boundary).
 ---
 
 ### 6.3 Gradients and Paint Effects
@@ -700,6 +766,10 @@ Linear export preserves stops/alpha/direction but reduces coordinates to an
 angle. Radial export becomes a centered circular gradient and does not preserve
 `cx/cy/r/fx/fy`. Gradient strokes remain editable, but PPTX-to-SVG re-import may
 retain only the first stop. Stop alpha and element opacity multiply.
+PPTX import normalizes compatible gradients and records any property-level
+degradation without aborting the deck; `--strict` keeps the closed parser
+contract. See
+[`conversion.md`](../scripts/docs/conversion.md#import-compatibility-and-recovery-boundary).
 The quality checker and exporter preflight both validate definition location,
 references, gradient structure, and paint context from the same closed contract.
 
@@ -734,8 +804,12 @@ Filters are native-effect metadata, not a general pixel-filter surface.
 | Definition/reference | Direct `<defs><filter id="...">` child with unique id; direct `filter="url(#id)"` attribute, never inline style |
 | Public targets | `<rect>`, `<circle>`, `<path>`, `<text>` |
 | Required primitive | `feDropShadow` or `feGaussianBlur` |
+| Required parameters | Explicit `stdDeviation` on either effect primitive; explicit `dx`, `dy`, and `flood-opacity` on `feDropShadow`; explicit `flood-opacity` on `feFlood`; explicit `slope` on linear `feFuncA` |
 | Accepted helpers | `feOffset`, `feFlood`, `feComposite`, `feMerge`, `feMergeNode`, `feComponentTransfer`, linear `feFuncA` |
-| Numeric values | Finite unitless values; non-negative `stdDeviation`; finite `dx` / `dy`; `feFuncA slope` within `0..1` |
+| Alpha transfer | Linear `feFuncA` maps multiplicative `slope` only; `intercept` is unsupported |
+| Blur sampling | `feGaussianBlur edgeMode` is unsupported; native effects do not expose the SVG edge-sampling modes |
+| Primitive coordinates | Omit `primitiveUnits` or use `userSpaceOnUse`; `objectBoundingBox` coordinates are unsupported |
+| Numeric values | Finite unitless values; non-negative `stdDeviation`; finite `dx` / `dy`; `feFuncA slope` within `0..1`; mapped glow `rad = stdDeviation × 9525`, shadow `blurRad = stdDeviation × 2 × 9525`, and shadow `dist = hypot(dx,dy) × 9525` must round into DrawingML `0..27273042316900` |
 | Classification | Meaningful non-zero offset → one outer shadow; zero/no offset → one glow |
 | Fidelity | `Approximate`; one filter becomes one DrawingML effect |
 
@@ -746,9 +820,20 @@ Native export does not preserve filter-region, `in/in2/result`, merge order, or
 composite topology. Other primitives, multiple independent effects, filters on
 `<image>` / `<tspan>` / `<g>` / unsupported targets are forbidden; apply the
 effect to supported objects or use explicit layers.
+The sole `<g filter>` exception is the hash-locked
+`data-pptx-part="geometry-preview"` transport in §1.4: it must be a direct child
+of an imported preset object and reference the same filter as that object's one
+hidden geometry carrier. The preview is render-only and never becomes a second
+PowerPoint object; this exception does not authorize filters on ordinary groups.
+PPTX import preserves one registered shape/connector shadow or glow and records
+unsupported object/run effects as import diagnostics instead of exposing a new
+authoring surface. See
+[`conversion.md`](../scripts/docs/conversion.md#import-compatibility-and-recovery-boundary)
+for tolerant, strict, and release-handling behavior.
 The quality checker and exporter preflight enforce the same definition,
-reference, primitive, target, and numeric-value contract; malformed values are
-never replaced by effect defaults during native export.
+reference, primitive, target, and numeric-value contract. Missing required
+geometry and malformed values are never replaced by effect defaults during
+native export.
 
 ```xml
 <defs>
@@ -828,6 +913,47 @@ guesses a fallback.
 frame-fit. Match the image box to the source ratio or use `slice`. Do not apply
 filters directly to `<image>`.
 
+**Hard rule — picture frames and sources are explicit and decodable**: every
+SVG `<image>` has explicit positive `width`/`height` and exactly one non-empty
+`href` or compatible `xlink:href`. A data URI must use a supported `image/*`
+MIME type, valid strict base64 when marked
+`base64`, a non-empty payload, and bytes that decode as the declared format.
+An external asset must resolve, use a supported extension, be non-empty, and
+decode as that extension. The registered formats are PNG, JPEG, GIF, WebP,
+BMP, TIFF, SVG, EMF, and WMF. Explicit template substitution tokens may remain
+unresolved only during template checking; export requires the resolved image.
+Missing, ambiguous, corrupt, mislabeled, or unsupported sources are errors and
+must never be dropped or packaged as invalid zero-byte media.
+
+**Hard rule — nested SVG is an imported crop transport, not a general
+viewport**: every non-root `<svg>` must be the exact picture-crop wrapper emitted
+by `pptx_to_svg`. The outer element has explicit registered project-geometry
+`x`, `y`, positive `width`/`height`, a unit-coordinate `viewBox` made of four
+ordinary decimal values, and
+`preserveAspectRatio="none"`; it contains exactly one direct, empty `<image>`
+with exactly one non-empty `href` or `xlink:href`, `x="0"`, `y="0"`, `width="1"`,
+`height="1"`, and `preserveAspectRatio="none"`. Its ancestor chain contains
+only the root SVG and ordinary visual `<g>` wrappers; definitions, text,
+render-only geometry details, and other non-visual containers cannot own this
+transport. The outer wrapper may additionally carry `id`, a supported
+`transform`, registered structure metadata (`data-pptx-layer` or
+`data-pptx-placeholder-carrier`), and the importer metadata
+`data-pptx-frame`, `data-pptx-object`, `data-pptx-shape-id`,
+`data-pptx-shape-name`, and `data-pptx-shape-scope`. A shape clip is present
+only when exact `data-pptx-crop="1"` and a registered image-only `clip-path`
+occur together and the local clip definition resolves. The inner image may
+add only registered `opacity`. The `viewBox` must quantize without clamping to
+a DrawingML `srcRect` with a positive visible region: each signed crop value
+must fit the OOXML percentage integer range `-2147483648..2147483647`, while
+`l + r < 100000` and
+`t + b < 100000` preserve a positive visible region. Negative crop values and
+crop windows extending outside the source unit rectangle are retained exactly,
+not clamped. `0 0 1 1` is redundant and must be written as a plain `<image>`.
+Extra visual children, indirect images, character data, unknown attributes,
+malformed or unrepresentable crop coordinates, and generalized nested
+viewports are errors. Checker and the converter share this parser so a nested
+subtree cannot pass validation and then silently disappear during export.
+
 | Overlay | Construction | Typical stops / alpha |
 |---|---|---|
 | Directional scrim | Linear rect, darkest beside text | `0%: 0.88; 55%: 0.30; 100%: 0` |
@@ -858,6 +984,11 @@ fidelity.
 | Gradient stroke | §6.3; re-import may flatten to first stop |
 | `marker-start` / `marker-end` | §1.1 native line end; type `Native-normalized`, size `Approximate` (`sm/med/lg`) |
 
+PPTX import treats unsupported line properties as source diagnostics: tolerant
+mode retains the object and omits only the unsupported outline; `--strict`
+retains the closed rejection behavior. See
+[`conversion.md`](../scripts/docs/conversion.md#import-compatibility-and-recovery-boundary).
+
 The dash grammar is closed: exact lowercase `none`, or at least two finite
 unitless numbers separated by whitespace or one comma. Generated SVG uses
 ordinary decimal spellings. A leading plus sign, exponent, trailing decimal
@@ -871,9 +1002,11 @@ Generated cap, join, and `vector-effect` values use the exact lowercase tokens
 in the table. Surrounding whitespace is compatible input and produces a
 recommendation; every other token is an error.
 
-Match marker fill to the parent stroke. Use markers for connectors and §6.10
-calculated geometry for a manual diagonal arrowhead. When exact grid spacing
-matters, use one multi-subpath path rather than a fixed-density preset pattern:
+Match marker paint to the parent stroke using the shape-specific channel from
+§1.1: fill for closed/oval line ends and stroke for the open arrow. Use markers
+for connectors and §6.10 calculated geometry for a manual diagonal arrowhead.
+When exact grid spacing matters, use one multi-subpath path rather than a
+fixed-density preset pattern:
 
 ```xml
 <path d="M40 0V120 M80 0V120 M0 40H120 M0 80H120"
@@ -895,7 +1028,7 @@ other value is invalid; the converter must not replace it with a default.
 | `font-style` | `normal` or `italic` | None | `italic` maps to `i="1"`; oblique, angle, relative, and CSS-wide values are invalid |
 | `text-anchor` | `start`, `middle`, or `end` on `<svg>`, `<g>`, or `<text>` | None | Maps to left/center/right paragraph alignment plus normalized frame position; it is invalid on `<tspan>` because run-level anchoring has no mapping |
 | `text-decoration` | `none`, `underline`, `line-through`, or `underline line-through` | `line-through underline` → canonical order | Maps to the single underline and strike run properties; unknown, repeated, or substring-like tokens are invalid |
-| `letter-spacing` | Finite unitless ordinary decimal SVG px | The same ordinary decimal with `px`, `pt`, or `em`; normalize to unitless px | Maps to `a:rPr@spc`; the final value must fit DrawingML `-400000..400000`; keywords, percentages, exponents, leading plus signs, trailing decimal points, non-finite values, and other units are invalid |
+| `letter-spacing` | Finite unitless ordinary decimal SVG px | The same ordinary decimal with `px`, `pt`, or `em`; normalize to unitless px | Maps to `a:rPr@spc`; the final value must fit DrawingML `-400000..400000`, and negative tracking must leave every generated DrawingML run with a positive estimated advance and its text frame with a positive extent; keywords, percentages, exponents, leading plus signs, trailing decimal points, non-finite values, and other units are invalid |
 
 The registered text properties follow SVG inheritance, including declarations
 on the root `<svg>`: inline `style` overrides the same element's direct
@@ -903,6 +1036,27 @@ attribute, which overrides its ancestor. Relative font sizes and `em` tracking
 resolve against the same effective inherited size in Checker and converter.
 Every declaration is validated even when a later declaration overrides it, so
 hidden garbage cannot bypass preflight.
+
+The DrawingML character-spacing range is necessary but not sufficient for
+negative tracking. After run assembly, each output run must retain a positive
+estimated advance using the quantized `sz` and `spc` values that will actually
+be written; a wider sibling run or paragraph line cannot hide a run whose
+aggregate advance would reverse or collapse, which can reorder or drop
+characters across PowerPoint-compatible renderers. The generated text frame
+must also retain a positive horizontal and vertical extent. Checker rejects
+directly measurable single-line violations, and the converter revalidates
+every generated run and text frame before writing OOXML. It must not clamp,
+take the absolute value of, or otherwise hide a non-positive advance or extent.
+Adjacent authored runs with identical final DrawingML run properties form one
+output run before sizing and validation; splitting text across equivalent
+`<tspan>` nodes is not a tracking escape hatch. Tracking and width estimates
+count the registered project text clusters rather than raw Unicode code points:
+combining marks, variation selectors, emoji modifiers and ZWJ sequences,
+paired regional indicators, and same-script virama conjuncts do not receive
+internal spacing.
+An unchanged imported native text body reuses the geometry carrier's positive
+shape frame and attaches the preserved `txBody` payload instead of regenerating
+runs or a text frame from the SVG estimate.
 
 **Hard rule — element-specific text surface**:
 
@@ -925,6 +1079,26 @@ hidden garbage cannot bypass preflight.
   attributes or inline style.
 - Any other unregistered `font-*` or `text-*` property is also an error; the
   closed grammar must not grow through an ignored CSS spelling.
+
+**Hard rule — project text whitespace**:
+
+- `xml:space` is the project's closed authoring control for significant text
+  whitespace. It is valid only as an exact direct attribute on `<text>` or
+  `<tspan>`, accepts only the case-sensitive values `default` and `preserve`,
+  inherits through the text tree, and may be reset on a child `<tspan>`.
+- The project maps this control to the visible Chromium/SVG2 behavior used by
+  Live Preview; it does not claim the legacy SVG 1.1 newline-deletion model.
+  XML line endings and tabs become U+0020 SPACE. In `default` mode, contiguous
+  U+0020 characters collapse across inline run boundaries and leading or
+  trailing default-mode spaces in the resulting text chunk are removed. In
+  `preserve` mode, every resulting U+0020 character remains significant.
+- Only XML whitespace is normalized. NBSP, ideographic space, and other
+  Unicode spacing characters remain literal text and must not be rewritten by
+  a generic Unicode-whitespace regular expression.
+- Source line breaks do not create PowerPoint paragraphs. Use the registered
+  positioned-`tspan`/paragraph structure for visual lines, and preserve DOM
+  text/tail order plus original style inheritance when normalizing that
+  structure.
 
 These allowlists are additive to the global structural blacklist and the
 paint, font-size, opacity, filter, and transform value contracts owned by their
@@ -977,6 +1151,9 @@ adjacent operations without a separator, units, unknown functions, and
 incomplete input fail quality check and export. Generated numeric tokens use
 ordinary decimals; a supported leading `+`, exponent, or trailing decimal point
 remains compatible input and receives a non-blocking normalization warning.
+Model-facing translation values, rotation centers, and matrix `e/f` use at
+most two decimals under §1.4; angles, scale arguments, and matrix `a/b/c/d`
+retain the precision required by the transform.
 
 Set text size/position directly. A text transform is either a translate-only
 list or one rotate operation; do not scale, matrix-transform, or mix operations
@@ -990,7 +1167,10 @@ finite, non-zero, and orthogonal; importer/live-editor matrices do not expand
 the hand-authored contract.
 Mirror around vertical pivot `cx` with
 `translate(cx 0) scale(-1 1) translate(-cx 0)`; use the analogous Y sequence
-for a horizontal pivot.
+for a horizontal pivot. During mirror materialization, imported PowerPoint
+groups with an axis flip keep their geometry reflection, while each descendant
+SVG text node receives the matching counter-reflection so browser previews keep
+glyphs upright. The tool-side native record retains the source group flip.
 
 Layer back-to-front: background/image → scrim/shadow → main geometry → labels /
 icons → top annotation. Finalization and native export independently expand
@@ -1188,6 +1368,10 @@ halftone and route dense full-slide texture to §6.12.
 glow; it does not blur the object or backdrop. Use a low-alpha raster for dense
 grain and explicit circles/paths only for sparse editable marks.
 
+Unsupported source effects remain visible where possible and retain their
+import diagnostics. Resolve those diagnostics before release export; see
+[`conversion.md`](../scripts/docs/conversion.md#import-compatibility-and-recovery-boundary).
+
 ---
 
 ### 6.13 Scenario Quick Reference
@@ -1288,60 +1472,10 @@ to at least one EMU per resolved row and column.
 metadata, bounds/fallback availability, table rows/columns, supported chart
 type, chart data shape, and any imported fallback baseline before export.
 
-**Hard rule — imported fallback freshness**: active table/chart markers emitted
-by `pptx_to_svg.py` carry `data-pptx-fallback-sha256`, a canonical hash of the
-marker fallback plus reachable document-level SVG fragment definitions. Editing
-geometry/text/paint, switching a local `url(#...)` or `href="#..."` target,
-changing a reachable definition, or changing the marker transform makes the
-replacement metadata stale. The mandatory quality checker warns and the default route
-keeps the edited SVG; `--native-charts-and-tables` hard-fails before replacement so it
-cannot discard that edit. Metadata/title/description nodes, `data-pptx-*`
-runtime attributes, marker-local stable ID renames, and marker-local
-`display:none` subtrees are excluded. `visibility:hidden` content,
-marker-local unused definitions, and explicitly referenced document-level
-target roots (even when hidden) remain conservatively hashed. External
-image/font file bytes are not read.
-Generated authoring and reusable templates omit import provenance and do not
-preseed a static fallback baseline; that hashless authored state is normal and
-does not warn. A hashless legacy imported marker that still carries PPTX import
-provenance remains native-compatible and warns in the checker/native route that
-stale detection is unavailable. An explicitly sealed authored marker that does
-carry a baseline is validated by the same integrity rule; only a missing
-authored baseline is silent. A stale hash is an integrity mismatch, not a
-visual-parity gate on an unchanged active marker.
-
-**Hard rule — imported fallback kind**: A PPTX chart with a complete baked
-preview may carry `data-pptx-fallback-kind="source-preview"`. Supported parsed
-classic families without a preview use a deterministic readable fallback
-marked `data-pptx-fallback-kind="normalized"`; it is explicitly not
-source-exact. When no current renderer exists, the importer emits its typed
-reconstruction aid with `data-pptx-fallback-kind="placeholder"`. That value
-alone records the diagnostic reconstruction-only fallback: quality checking
-and export warn, default export keeps the placeholder, and
-`--native-charts-and-tables` may reconstruct a PowerPoint-native chart when the same
-group has a valid active `data-pptx-replace-with="chart"` payload. The allowed
-values remain closed; unknown, whitespace-padded, or contradictory values fail.
-`data-pptx-replacement-status` records the closed reason code when imported
-content has a complete visual fallback but cannot make an active replacement
-claim. It and `data-pptx-replace-with` are mutually exclusive on the same
-visible group.
-
-**Imported replacement provenance**: A table/chart group created by
-`pptx_to_svg.py` under this contract—whether it has an active replacement claim
-or a fallback-only status—carries `data-pptx-import-source="pptx"`. This records
-provenance for the imported-style normalization path; it does not identify the
-replacement kind, and generated authoring omits it.
-
-**Legacy read compatibility**: The converter and checker continue to read
-`data-pptx-native`, `data-pptx-native-status`, `data-pptx-native-source`, and
-`data-pptx-visual-status`. The legacy pair
-`data-pptx-visual-status="placeholder"` plus
-`data-pptx-route-status="reconstruction-only"` maps to canonical
-`data-pptx-fallback-kind="placeholder"`; canonical authoring has no route-status
-attribute. `--native-objects` remains a compatibility alias for
-`--native-charts-and-tables`. New generated SVG and documented commands MUST
-use the canonical spellings. If a legacy and canonical attribute are both
-present, they must resolve to the same value; a conflict fails validation.
+Imported marker freshness, fallback classification, provenance, and legacy
+read compatibility are operational import concerns. Keep generated authoring
+free of those attributes; use the exact behavior and field index in
+[`conversion.md`](../scripts/docs/conversion.md#native-table-and-chart-import-claims).
 
 ```xml
 <g id="p03-revenue-chart" data-pptx-replace-with="chart">
@@ -1382,8 +1516,11 @@ boolean `bold`, `italic`, `underline`, and `strike`, plus optional `color`,
 `font_size`, one-typeface `font_family`, `lang`, and `alt_lang`. Unknown fields,
 wrong types, empty run lists, multi-typeface `font_family`, and unsupported
 colors fail fast. PPTX import requires exact physical row/grid topology and
-normalizes source presentation-only run XML outside this closed schema, but
-relationship-bearing text, extensions, structural line breaks, fields, tabs,
+normalizes source presentation-only run XML outside this closed schema only
+when it contains no non-empty `rPr` / `defRPr` / `endParaRPr` `effectLst` or
+`effectDag`. A table-cell run effect follows the blocking effect contract above
+instead of entering either the native payload or an effect-free fallback.
+Relationship-bearing text, extensions, structural line breaks, fields, tabs,
 bullets, malformed run topology, and unsupported text-body structure remain
 fallback-only.
 Per-side cell borders use `borders.left|right|top|bottom`, where each value is
@@ -1629,9 +1766,9 @@ defaults to `bottom` and accepts `top`, `left`, or `right`.
 
 ### PPTX Structure Routing
 
-Every new SVG project declares one deterministic route. Free-design and brand-only projects use `pptx_structure.mode: flat`, omit `pptx_masters` / `pptx_layouts` / `page_pptx_layouts` / `page_layouts`, and author no Master/Layout/layer/placeholder metadata. Export keeps all represented content Slide-local while materializing one clean project-owned Master plus one Blank Layout from the current color/typography lock; stock content placeholders and unused built-in Layouts are removed, while the standard date/footer/slide-number capability hooks remain. Deck/layout template projects use `mode: structured`; `standard` / `fidelity` templates use their authored contract, while mirror templates use restored source identities and parentage.
+Every new SVG project declares one deterministic route. Free-design, brand-only, and `template_reuse_scope: style` projects use `pptx_structure.mode: flat`, omit `pptx_masters` / `pptx_layouts` / `page_pptx_layouts` / `page_layouts`, and author no Master/Layout/layer/placeholder metadata. Export keeps all represented content Slide-local while materializing one clean project-owned Master plus one Blank Layout from the current color/typography lock; stock content placeholders and unused built-in Layouts are removed, while the standard date/footer/slide-number capability hooks remain. Deck/layout template projects confirmed with `template_reuse_scope: mirror|layout` use `mode: structured`; `standard` / `fidelity` templates use their authored contract, while mirror templates use the validated source identities and parentage declared by the newly materialized workspace.
 
-**Hard rule — no structure inference**: Flat export performs no promotion or deduplication; every object stays Slide-local. Structured template export compiles only declared root identities, atomic fixed layers, and slot groups—it does not assign Layout families, cluster pages, infer placeholders, or repair missing metadata. Legacy structured/template projects must run [`restore-pptx-structure`](../workflows/restore-pptx-structure.md) first.
+**Hard rule — no structure inference**: Flat export performs no promotion or deduplication; every object stays Slide-local. Structured template export compiles only declared root identities, atomic fixed layers, and slot groups—it does not assign Layout families, cluster pages, infer placeholders, repair missing metadata, or migrate legacy contracts. Create a new current workspace through [`create-template`](../workflows/create-template.md) before generating structured pages.
 
 **Layout reuse**: Reuse one Layout key only when its ordered fixed Layout atoms and slot ids/types/effective indices/default bounds/binding modes are identical. Different wording, data, imagery, crop, or Slide-local carrier geometry does not create a new Layout. A genuinely different reusable contract gets a new key even when both pages are semantically `content`.
 
@@ -1641,11 +1778,19 @@ Every new SVG project declares one deterministic route. Free-design and brand-on
 
 ### Explicit PPTX Master / Layout / Placeholder Metadata
 
-**Trigger**: This explicit metadata interface applies only to deck/layout template projects and structure-restoration workflows. `spec_lock.md` declares `pptx_structure.mode: structured`, complete unique `pptx_masters` / `pptx_layouts` rosters, one `page_pptx_layouts` assignment per generated page, and `page_layouts` as authoring-prototype provenance. Flat free-design/brand-only SVGs use none of these metadata fields.
+**Trigger**: This explicit metadata interface applies only to new pages generated from a current deck/layout template workspace with `template_reuse_scope: mirror|layout`. `spec_lock.md` declares `pptx_structure.mode: structured`, complete unique `pptx_masters` / `pptx_layouts` rosters, one `page_pptx_layouts` assignment per generated page, and `page_layouts` as authoring-prototype provenance. `template_reuse_scope: style`, free-design, and brand-only SVGs use `mode: flat` and none of these metadata fields.
 
 **Project lock**: A Master row is `<master_key>: <PowerPoint picker name>`. A unique Layout row is `<layout_key>: <master_key> | <PowerPoint picker name> | <prototype source>`, where the source is a generated `P<NN>` or installed `template:<basename>`. A page assignment is `P<NN>: <layout_key>` under `page_pptx_layouts`. The SVG root values MUST match the assigned definition. A Layout key belongs to exactly one Master and must be globally unique. Reuse one key only when prototypes share identical ordered Layout atoms and slot ids/types/effective indices/default bounds/binding modes. An unused Layout uses a template SVG source and remains registered without a published carrier slide. Every structured route requires numeric `spec_lock.md` typography `title` / `body` rows.
 
-**Template behavior**: Strict preserves the selected prototype's declared Master/Layout/slot contract. Adaptive retains its Master and may allocate a new Layout key/name only when fixed Layout atoms or slot topology/bounds change; update the lock during authoring. Mirror-created prototypes preserve restored source identity, literal paint, typography, effects, atomic geometry, and referenced assets. `standard` / `fidelity` never make source topology authoritative; mirror does not synthesize a replacement topology.
+**Template behavior**: Strict preserves the selected prototype's declared Master/Layout/slot contract. Adaptive retains its Master and may allocate a new Layout key/name only when fixed Layout atoms or slot topology/bounds change; update the lock during authoring. Mirror-created prototypes preserve validated source identity, literal paint, typography, effects, atomic geometry, and referenced assets in a new workspace. `standard` / `fidelity` never make source topology authoritative; mirror does not synthesize a replacement topology or fill missing facts.
+
+Imported inherited-shape visibility remains an immutable analysis fact until a
+structured mirror is materialized. The final mirror root carries that fact with
+the two optional canonical booleans below so export can write the preserved source
+package fields without inferring visibility from which shapes happen to be
+present. Authored `standard` / `fidelity` templates normally omit both and use
+the default `true`. See
+[`conversion.md`](../scripts/docs/conversion.md#import-compatibility-and-recovery-boundary).
 
 **Master text-style contract**: Flat and structured export map the
 locked `title` size to every `a:defRPr` in Master `p:titleStyle`. Level 1 in
@@ -1680,17 +1825,19 @@ prototype size remain unchanged.
 | `data-pptx-master-name="Default Master"` | root `<svg>` | Sets the Master picker/display name |
 | `data-pptx-layout="content"` | root `<svg>` | Binds the slide to one generated reusable layout key |
 | `data-pptx-layout-name="Title and Content"` | root `<svg>` | Sets the PowerPoint layout-picker name; defaults from the layout key |
+| `data-pptx-show-master-shapes="false"` | root `<svg>` | Accepts exact lowercase `true` or `false` and writes the assigned Layout's `p:sldLayout@showMasterSp`; every SVG using the same Layout key must repeat the same value; omission means `true` |
+| `data-pptx-show-inherited-shapes="false"` | root `<svg>` | Accepts exact lowercase `true` or `false` and writes this Slide's `p:sld@showMasterSp`; `false` hides inherited Layout and Master shapes without removing backgrounds, placeholders, parts, or parent relationships; omission means `true` |
 | `data-pptx-layer="master"` | direct semantic atom | Moves one repeated static object/background into the named Slide Master; ordinary `<g>` is forbidden, while one validated compact authored-preset `<g>` (§1.5) is an atomic exception |
 | `data-pptx-layer="layout"` | direct semantic atom | Moves one repeated static object/background into the selected Layout; ordinary `<g>` is forbidden, while one validated compact authored-preset `<g>` (§1.5) is an atomic exception |
 | `data-pptx-layer="slide"` | direct full-canvas solid `<rect>` only | Writes a one-page override as Slide `p:bg` |
 | `data-pptx-placeholder="..."` | direct slot `<g id>` | Declares a reusable Layout slot whose visible content remains Slide-local |
-| `data-pptx-placeholder-bounds="x y width height"` | slot `<g>` | Supplies the positive reusable design-zone frame in SVG user units |
+| `data-pptx-placeholder-bounds="x y width height"` | slot `<g>` | Supplies the positive reusable design-zone frame in SVG user units with at most two decimals per value |
 | `data-pptx-placeholder-idx="1"` | slot `<g>` | Retains an imported source Layout placeholder index; optional for reconstructed layouts |
 | `data-pptx-placeholder-carrier="true"` | one compatible direct child of a normal slot | Binds that visible child as the real Slide placeholder carrier |
 | `data-pptx-placeholder-binding="proxy"` | composite `object` slot `<g>` only | Keeps the visible group ordinary and creates one hidden transparent binding proxy |
 | `data-pptx-editable="false"` | master/layout element or slide background | Declares intentional editing outside ordinary slide content |
 
-**Hard rule — explicit only**: On a structured deck/layout template route, every SVG requires the four root Master/Layout identity attributes. Every Master/Layout atom and slot requires a unique stable `id` and is a direct root child. Layouts with zero slots are valid. `data-pptx-layout-kind`, `distilled`, and `utility` are legacy metadata and fail the structured contract. Flat free-design/brand-only pages omit the entire interface.
+**Hard rule — explicit only**: On a structured `template_reuse_scope: mirror|layout` route, every SVG requires the four root Master/Layout identity attributes. Optional inherited-shape visibility uses only exact lowercase `true` / `false`; other spellings fail, and omission means `true`. Every Master/Layout atom and slot requires a unique stable `id` and is a direct root child. Layouts with zero slots are valid. `data-pptx-layout-kind`, `distilled`, and `utility` are legacy metadata and fail the structured contract. Flat `template_reuse_scope: style`, free-design, and brand-only pages omit the entire interface, including the visibility attributes.
 
 **Layer order**: Author the SVG in PowerPoint paint order: Master background,
 Layout background, optional Slide background, remaining Master atoms, remaining Layout atoms,
@@ -1726,6 +1873,14 @@ native text frame. Use the default paragraph merge; `--no-merge` cannot supply
 several line shapes as one
 PowerPoint placeholder prototype/binding. Leave strict-line text Slide-local
 when separate frames are the required result.
+
+For a materialized mirror, an imported text carrier may additionally keep the
+source shape's positive `data-pptx-frame="x y width height"`. That frame owns
+the Slide carrier `a:xfrm`; the converter reconstructs text-body insets from the
+visible SVG anchor/baseline instead of shrinking the shape to glyph bounds.
+`data-pptx-placeholder-bounds` remains the reusable Layout default and may
+legitimately differ. Do not add `data-pptx-frame` to an authored
+`standard` / `fidelity` carrier merely to duplicate its Layout bounds.
 
 **Blank text carrier**: Leave a marked text carrier empty or whitespace-only
 when the placeholder must remain visually blank. Export materializes one
@@ -1783,11 +1938,17 @@ group—or the explicit composite proxy downgrade. `media` currently binds
 an authored image/crop to a native `media` placeholder; it does not synthesize
 video or audio media from a decorative SVG group.
 
-### Legacy Structure Migration Boundary
+### Legacy Template Input Boundary
 
-Existing structured/template projects or packages that carry `native_structure.json` / `source_template.pptx`, `pptx_structure.mode: baseline|template|preserve`, `layout_strategy`, `data-pptx-layout-kind`, `distilled` / `utility`, direct atomic placeholders, or an incomplete root Master identity must run [`restore-pptx-structure`](../workflows/restore-pptx-structure.md) before generation or export. A project explicitly declaring `pptx_structure.mode: flat` is the current free-design/brand-only route and does not require restoration merely because it has no Master/Layout metadata.
+Existing structured/template projects or packages that carry `native_structure.json` / `source_template.pptx`, `pptx_structure.mode: baseline|template|preserve`, `layout_strategy`, `data-pptx-layout-kind`, `distilled` / `utility`, direct atomic placeholders, or an incomplete root Master identity are not generation/export inputs and are never upgraded in place. Create a separate current workspace through [`create-template`](../workflows/create-template.md). A project explicitly declaring `pptx_structure.mode: flat` is the current free-design/brand-only route and needs no conversion merely because it has no Master/Layout metadata.
 
-When original PPTX/native facts exist, migration preserves the complete source Master roster, Layout parent relationships and picker names, placeholder type/index/bounds, and visible supported geometry while normalizing the package into the explicit contract. Source Master/Layout groups are recursively flattened into atomic SVG elements. Create one reusable prototype SVG for every retained Layout, including Layouts unused by source slides; downstream `pptx_layouts` definitions can register those prototypes without manufacturing generated pages. A subsequent `create-template` run treats the result according to its selected mode: `standard` / `fidelity` author a new topology, while mirror keeps the restored source topology. When no native facts exist, the main Agent explicitly derives a structured contract from the complete SVG pages; the exporter never performs that derivation.
+| Available source | Allowed create-template behavior |
+|---|---|
+| Original PPTX Type A | `standard` / `fidelity` author new topology; `mirror` preserves supported Master/Layout/placeholder facts that still exist in the package |
+| Legacy or unstructured SVG Type B | `standard` / `fidelity` use pages as visual/contextual reference and author a complete new contract; old metadata is not output topology |
+| Complete current SVG Type B | `mirror` may preserve the explicit current contract in a new workspace; authored modes may replace it |
+
+Without an original PPTX or complete current Type B contract, do not claim mirror or source-topology recovery. After template creation, Generate PPTX Step 3 authors new structured `svg_output/` pages; the exporter only compiles those declarations and never derives, repairs, or migrates structure.
 
 ---
 

@@ -1,6 +1,9 @@
 # Conversion Tools
 
-> Architecture rationale (why native-Python first with pandoc fallback, why curl_cffi for TLS impersonation): see [docs/technical-design.md "Source Content Conversion"](../../../../docs/technical-design.md#source-content-conversion).
+> **Design boundary**: use native-Python converters for supported formats,
+> invoke Pandoc only for explicit fallback formats, and let web conversion use
+> `curl_cffi` when available for sites that reject Python's default TLS
+> fingerprint.
 
 Source conversion tools turn PDFs, documents, slide decks, and web pages into Markdown before project creation.
 
@@ -223,7 +226,7 @@ Outputs (per source deck, prefixed by file stem):
 - `<stem>.slide_library.json` — text slots, geometry, native tables, native chart display caches, and SmartArt nodes/connections
 - `source_profile.json` — the single multi-deck index: a compact Strategist-facing digest per deck (over identity, tables, charts, SmartArt, and page types) under `decks[]`, with prefixed artifact pointers
 
-`project_manager.py import-sources` runs this automatically for PPTX/PPTM/PPSX/PPSM/POTX/POTM inputs and stores the bundle directly under `analysis/`. Multi-deck per project: importing several PPTX files gives each its own `<stem>.*` artifacts and a `decks[]` entry in the shared `source_profile.json` index (re-importing the same stem replaces its entry). The beautify / template-fill workflows stay single-deck and read one chosen deck's `<stem>.*` artifacts.
+`project_manager.py import-sources` runs this automatically for PPTX/PPTM/PPSX/PPSM/POTX/POTM inputs and stores the bundle directly under `analysis/`. Multi-deck per project: importing several PPTX files gives each its own `<stem>.*` artifacts and a `decks[]` entry in the shared `source_profile.json` index (re-importing the same stem replaces its entry). The beautify profile and Fill Native PPTX route stay single-deck and read one chosen deck's `<stem>.*` artifacts.
 
 Usage boundary:
 - Standard generation uses these fields as facts and recommendation candidates; it does not inherit source slide coordinates or page order by default.
@@ -238,6 +241,7 @@ Reconstruct a PPTX package as editable SVG views by reading OOXML directly.
 python3 scripts/pptx_to_svg.py deck.pptx --inheritance-mode both
 python3 scripts/pptx_to_svg.py deck.pptx --inheritance-mode layered
 python3 scripts/pptx_to_svg.py deck.pptx --inheritance-mode flat
+python3 scripts/pptx_to_svg.py deck.pptx --strict
 ```
 
 | Mode | Output |
@@ -245,6 +249,39 @@ python3 scripts/pptx_to_svg.py deck.pptx --inheritance-mode flat
 | `both` (default) | Layered master/layout/slide SVGs under `svg/`, plus self-contained slides under `svg-flat/` |
 | `layered` | Only the layered `svg/` view and inheritance metadata |
 | `flat` | One self-contained slide SVG per page under `svg/` |
+
+For Office pictures that carry both a raster compatibility preview on
+`a:blip` and an editable SVG relationship in `asvg:svgBlip`, import resolves
+the SVG relationship first. The raster relationship is used only when the SVG
+relationship or media part cannot be read. The template manifest uses the same
+relationship preference for asset identity; its existing missing-media gate
+remains strict rather than silently treating the raster preview as the
+template's canonical asset.
+
+### Import compatibility and recovery boundary
+
+Import is tolerant by default because the source deck is user-owned or comes
+from third-party authoring tools. Recovery happens at the narrowest safe
+boundary: first omit only an unsupported property or feature; if that is not
+possible, replace only the affected object with a visible diagnostic
+placeholder; omit a background without discarding its page. Corrupt ZIP/XML or
+missing required package structure remains fatal because no safe local recovery
+exists. Pass `--strict` for parser development or contract verification when
+the first unsupported/malformed source construct should stop conversion.
+
+Every successful run writes `<output>/conversion-report.json`. Its stable
+top-level fields are `schemaVersion`, `source`, `mode`, `summary`, and
+`diagnostics`. Each diagnostic records a reason `code`, source `message`, chosen
+`fallback`, package `part_path`, and—when available—`slide_index`, `shape_id`,
+`shape_name`, and `shape_kind`. The command also prints a bounded warning
+summary instead of a raw Python traceback.
+
+In the detailed native-object notes below, “fails closed” or “error” describes
+the native replacement claim or strict mode. Default tolerant deck import
+retains the usable fallback/object and records the degradation; it does not
+discard unrelated shapes, pages, or the entire deck.
+
+### Native table and chart import claims
 
 Supported text-grid tables and conservative classic-chart caches carry a
 `data-pptx-replace-with` claim beside their SVG fallback, with the replacement
@@ -255,10 +292,12 @@ safe solid/no-fill per-side borders, plain multi-paragraph cells, and a closed
 run-rich paragraph schema.
 Each run requires `text` and may use only `bold`, `italic`, `underline`,
 `strike`, `color`, `font_size`, one `font_family`, `lang`, and `alt_lang`.
-Presentation-only source run XML normalizes. Relationship-bearing text,
-extensions, noncanonical/overlapping merges, nonblank merge slaves, unsafe
-border XML, non-solid fills, structural line breaks/fields/tabs/bullets, and
-broken text topology remain fallback-only.
+Presentation-only source run XML without a non-empty `effectLst` / `effectDag`
+normalizes. A table-cell run effect disables native replacement and adds a
+blocking effect diagnostic. Relationship-bearing text, extensions,
+noncanonical/overlapping merges, nonblank merge slaves, unsafe border XML,
+non-solid fills, structural line breaks/fields/tabs/bullets, and broken text
+topology remain fallback-only.
 Markers remain dormant
 unless a later export uses `--native-charts-and-tables`. That opt-in is
 data-object-first: the default fallback still exports as editable DrawingML
@@ -271,7 +310,8 @@ rendered SVG table; unsupported charts keep a baked preview when one exists.
 For the currently supported parsed classic families (column/bar/line/area,
 pie/doughnut, scatter, and bubble), a chart without a baked preview receives a
 deterministic readable fallback marked
-`data-pptx-fallback-kind="normalized"`. Unknown style XML still fails closed;
+`data-pptx-fallback-kind="normalized"`. Unknown style XML disables the native
+replacement claim or falls back to a diagnostic object in tolerant mode;
 common solid/no-fill/line/marker forms and scheme colors are normalized for the
 SVG fallback and core payload colors, while native opt-in may still normalize
 unmodeled alpha, line, marker, or no-fill details. Common General, decimal,
@@ -330,7 +370,8 @@ axis fields. The importer also accepts radar, safe `of_pie` `serLines`, the
 closed axis/title/legend normalization cases, and bar/column `gapWidth` /
 `overlap`. `gapWidth` must be one integer in `0..500` and `overlap` one integer
 in `-100..100`; both normalize in native output, while malformed, duplicate, or
-out-of-range values fail closed. These additions do not expand the normalized
+out-of-range values disable the native replacement claim in tolerant mode and
+stop strict import. These additions do not expand the normalized
 renderer.
 Safe stock series style may pass the structural gate, while stock series,
 `hiLowLines`, and up-down bar local styling can still normalize under the
@@ -352,6 +393,138 @@ one- or two-paragraph title styling; two paragraphs retain their `title` /
 Concrete slide SVGs resolve `<a:fld type="slidenum">` using the presentation's
 `firstSlideNum` display numbering. Standalone master/layout SVGs keep the
 literal field fallback because one shared part can serve multiple slides.
+
+### Maintenance smoke checks
+
+Run these checks from the repository root after changing `pptx_to_svg/` or its
+CLI. They generate every required input under `/tmp`; do not replace them with
+a committed `test_*.py` suite.
+
+#### Healthy generated deck
+
+```bash
+python3 - <<'PY'
+from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.util import Inches
+
+presentation = Presentation()
+slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+shape = slide.shapes.add_shape(
+    MSO_SHAPE.RECTANGLE,
+    Inches(1),
+    Inches(1),
+    Inches(3),
+    Inches(1),
+)
+shape.text = "PPTX import smoke check"
+presentation.save("/tmp/ppt-master-smoke-healthy.pptx")
+PY
+
+python3 "skills/ppt-master/scripts/pptx_to_svg.py" \
+  "/tmp/ppt-master-smoke-healthy.pptx" \
+  --inheritance-mode flat \
+  -o "/tmp/ppt-master-smoke-healthy"
+python3 -c "import json; from pathlib import Path; report = json.loads(Path('/tmp/ppt-master-smoke-healthy/conversion-report.json').read_text()); assert report['summary'] == {'slides': 1, 'warnings': 0}, report['summary']; print('OK: 1 slide, 0 warnings')"
+```
+
+Expected: both commands exit `0`; the assertion prints
+`OK: 1 slide, 0 warnings`.
+
+#### Tolerant/strict color-structure probe
+
+Generate a two-shape PPTX, then add one foreign attribute to the first shape's
+valid `a:srgbClr` node:
+
+```bash
+python3 -c '
+from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
+
+from pptx import Presentation
+from pptx.dml.color import RGBColor
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.util import Inches
+
+base = Path("/tmp/ppt-master-color-smoke-base.pptx")
+target = Path("/tmp/ppt-master-color-smoke.pptx")
+presentation = Presentation()
+slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+for left, color in ((1, (0x44, 0x72, 0xC4)), (4, (0xED, 0x7D, 0x31))):
+    shape = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        Inches(left),
+        Inches(1),
+        Inches(2),
+        Inches(1),
+    )
+    shape.fill.solid()
+    shape.fill.fore_color.rgb = RGBColor(*color)
+presentation.save(base)
+
+with ZipFile(base) as source, ZipFile(target, "w", ZIP_DEFLATED) as destination:
+    patched = False
+    for member in source.infolist():
+        payload = source.read(member)
+        if member.filename == "ppt/slides/slide1.xml":
+            old = b"<a:srgbClr val=\"4472C4\"/>"
+            new = b"<a:srgbClr val=\"4472C4\" legacy=\"1\"/>"
+            if old not in payload:
+                raise RuntimeError("probe color node was not generated")
+            payload = payload.replace(old, new, 1)
+            patched = True
+        destination.writestr(member, payload)
+if not patched:
+    raise RuntimeError("slide XML was not patched")
+print(target)
+'
+```
+
+Run tolerant import and verify both the recovery report and the visible SVG:
+
+```bash
+python3 "skills/ppt-master/scripts/pptx_to_svg.py" \
+  "/tmp/ppt-master-color-smoke.pptx" \
+  --inheritance-mode flat \
+  -o "/tmp/ppt-master-smoke-color-tolerant"
+python3 -c '
+import json
+from pathlib import Path
+
+output = Path("/tmp/ppt-master-smoke-color-tolerant")
+report = json.loads((output / "conversion-report.json").read_text())
+diagnostics = report["diagnostics"]
+svg = (output / "svg" / "slide_01.svg").read_text()
+assert report["summary"] == {"slides": 1, "warnings": 1}, report["summary"]
+assert len(diagnostics) == 1, diagnostics
+assert diagnostics[0]["code"] == "color-structure-normalized", diagnostics[0]
+assert diagnostics[0]["fallback"] == "retain recognized color attributes and modifiers", diagnostics[0]
+assert diagnostics[0]["slide_index"] == 1, diagnostics[0]
+assert diagnostics[0]["shape_name"] == "Rectangle 1", diagnostics[0]
+assert "#4472C4" in svg and "#ED7D31" in svg
+print("OK: tolerant import recovered #4472C4 and preserved #ED7D31")
+'
+```
+
+Expected: both commands exit `0`; the importer reports one
+`color-structure-normalized` warning and the assertion prints
+`OK: tolerant import recovered #4472C4 and preserved #ED7D31`.
+
+Run the same probe in strict mode:
+
+```bash
+python3 "skills/ppt-master/scripts/pptx_to_svg.py" \
+  "/tmp/ppt-master-color-smoke.pptx" \
+  --inheritance-mode flat \
+  --strict \
+  -o "/tmp/ppt-master-smoke-color-strict"
+```
+
+Expected: exit `1`, no traceback, and one error line:
+
+```text
+Error: PPTX-to-SVG conversion failed: Invalid DrawingML sRGB color structure
+```
 
 ## `source_to_md/web_to_md.py`
 
