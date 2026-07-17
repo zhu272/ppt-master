@@ -74,12 +74,18 @@ from server_common import (  # noqa: E402
 configure_utf8_stdio()
 
 from annotations import (  # noqa: E402
+    add_global_annotation,
     assign_temp_ids,
     is_editable_attr,
+    load_global_annotations,
     parse_annotations,
+    parse_page_annotation,
     promote_tspan_to_text,
+    remove_global_annotation,
+    remove_page_annotation,
     set_annotation,
     set_attributes,
+    set_page_annotation,
     set_text,
     strip_unused_temp_ids,
 )
@@ -639,6 +645,12 @@ def create_app(
         )
         if cached is not None:
             content, warnings, disk_annotations, id_to_tag = cached
+            # Page annotation is cheap to re-parse; don't bloat the cache tuple
+            try:
+                tree = ET.parse(path_str)
+                page_annotation = parse_page_annotation(tree.getroot())
+            except ET.ParseError:
+                page_annotation = None
         else:
             try:
                 tree = ET.parse(path_str)
@@ -659,6 +671,7 @@ def create_app(
                 if not ok:
                     return jsonify({'error': f'Failed to apply pending edits: {reason}'}), 500
             disk_annotations = parse_annotations(root)
+            page_annotation = parse_page_annotation(root)
             id_to_tag: dict[str, str] = {}
             for elem in root.iter():
                 eid = elem.get('id')
@@ -695,6 +708,7 @@ def create_app(
             'name': name,
             'content': content,
             'annotations': annotations_list,
+            'page_annotation': page_annotation,
             'warnings': warnings,
             'mtime': mtime,
             'undo_depth': len(pending_edits),
@@ -742,6 +756,99 @@ def create_app(
             'status': 'ok',
             'annotations_count': len(annotations.get(name, {})),
         })
+
+    # ── Page-level annotations ────────────────────────────────────────
+
+    @app.route('/api/slide/<name>/page-annotation', methods=['GET'])
+    def get_page_annotation(name: str):
+        """Return the current page-level annotation for a slide."""
+        svg_file = _safe_svg_path(name)
+        if svg_file is None or not svg_file.exists():
+            return jsonify({'annotation': None})
+        try:
+            tree = ET.parse(str(svg_file))
+            root = tree.getroot()
+        except ET.ParseError:
+            return jsonify({'annotation': None})
+        return jsonify({'annotation': parse_page_annotation(root)})
+
+    @app.route('/api/slide/<name>/page-annotation', methods=['POST'])
+    def post_page_annotation(name: str):
+        """Set or update a page-level annotation on a slide."""
+        data = request.get_json(silent=True) or {}
+        annotation = data.get('annotation', '')
+        if not isinstance(annotation, str) or not annotation.strip():
+            return jsonify({'error': 'annotation is required'}), 400
+        if len(annotation) > 10000:
+            return jsonify({'error': 'Annotation too long (max 10000 chars)'}), 400
+
+        svg_file = _safe_svg_path(name)
+        if svg_file is None:
+            return jsonify({'error': 'Invalid slide name'}), 400
+        if not svg_file.exists():
+            return jsonify({'error': 'Slide not found'}), 404
+
+        try:
+            tree = ET.parse(str(svg_file))
+            root = tree.getroot()
+        except ET.ParseError as exc:
+            return jsonify({'error': f'Failed to parse SVG: {exc}'}), 500
+
+        set_page_annotation(root, annotation)
+        tree.write(str(svg_file), encoding='UTF-8', xml_declaration=True)
+
+        return jsonify({'status': 'ok', 'annotation': annotation})
+
+    @app.route('/api/slide/<name>/page-annotation', methods=['DELETE'])
+    def delete_page_annotation(name: str):
+        """Remove the page-level annotation from a slide."""
+        svg_file = _safe_svg_path(name)
+        if svg_file is None:
+            return jsonify({'error': 'Invalid slide name'}), 400
+        if not svg_file.exists():
+            return jsonify({'error': 'Slide not found'}), 404
+
+        try:
+            tree = ET.parse(str(svg_file))
+            root = tree.getroot()
+        except ET.ParseError as exc:
+            return jsonify({'error': f'Failed to parse SVG: {exc}'}), 500
+
+        remove_page_annotation(root)
+        tree.write(str(svg_file), encoding='UTF-8', xml_declaration=True)
+
+        return jsonify({'status': 'ok'})
+
+    # ── Global annotations ───────────────────────────────────────────
+
+    @app.route('/api/global-annotations', methods=['GET'])
+    def get_global_annotations():
+        """List all global annotations."""
+        project_path = app.config['PROJECT_PATH']
+        return jsonify({'annotations': load_global_annotations(project_path)})
+
+    @app.route('/api/global-annotations', methods=['POST'])
+    def post_global_annotation():
+        """Add a new global annotation."""
+        data = request.get_json(silent=True) or {}
+        annotation = data.get('annotation', '')
+        if not isinstance(annotation, str) or not annotation.strip():
+            return jsonify({'error': 'annotation is required'}), 400
+        if len(annotation) > 10000:
+            return jsonify({'error': 'Annotation too long (max 10000 chars)'}), 400
+
+        project_path = app.config['PROJECT_PATH']
+        entry = add_global_annotation(project_path, annotation.strip())
+        return jsonify({'status': 'ok', 'entry': entry})
+
+    @app.route('/api/global-annotations/<int:index>', methods=['DELETE'])
+    def delete_global_annotation(index: int):
+        """Remove a global annotation by index."""
+        project_path = app.config['PROJECT_PATH']
+        ok = remove_global_annotation(project_path, index)
+        if not ok:
+            return jsonify({'error': 'Annotation not found'}), 404
+        return jsonify({'status': 'ok'})
 
     @app.route('/api/slide/<name>/edit', methods=['POST'])
     def post_edit(name: str):

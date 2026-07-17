@@ -18,6 +18,7 @@ Dependencies:
 """
 
 import argparse
+import json
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -28,16 +29,20 @@ from console_encoding import configure_utf8_stdio
 configure_utf8_stdio()
 
 
-def scan_svg_file(svg_path: Path) -> list[dict]:
-    """Scan a single SVG file for edit annotations."""
+def scan_svg_file(svg_path: Path) -> tuple[list[dict], str | None]:
+    """Scan a single SVG file for element and page annotations.
+
+    Returns (element_annotations, page_annotation).
+    """
     try:
         tree = ET.parse(svg_path)
     except ET.ParseError:
-        return []
+        return [], None
 
     root = tree.getroot()
     annotations = []
 
+    # Element-level annotations (data-edit-target="true")
     for elem in root.iter():
         if elem.get('data-edit-target') == 'true':
             tag = elem.tag
@@ -55,43 +60,86 @@ def scan_svg_file(svg_path: Path) -> list[dict]:
                 'content_preview': content_preview,
             })
 
-    return annotations
+    # Page-level annotation (data-edit-target="page" on root SVG)
+    page_annotation = None
+    if root.get('data-edit-target') == 'page':
+        page_annotation = root.get('data-edit-annotation') or None
+
+    return annotations, page_annotation
 
 
-def scan_directory(dir_path: Path) -> dict[str, list[dict]]:
-    """Scan all SVG files in svg_output/ for edit annotations."""
+def scan_directory(dir_path: Path) -> tuple[dict[str, list[dict]], dict[str, str], list[dict]]:
+    """Scan all SVG files in svg_output/ for element and page annotations.
+
+    Returns (element_annotations_by_file, page_annotations_by_file, global_annotations).
+    """
     svg_dir = dir_path / 'svg_output'
     if not svg_dir.exists():
-        return {}
+        return {}, {}, []
 
-    results = {}
+    elem_results = {}
+    page_results = {}
     for svg_file in sorted(svg_dir.glob('*.svg')):
-        annotations = scan_svg_file(svg_file)
+        annotations, page_annotation = scan_svg_file(svg_file)
         if annotations:
-            results[svg_file.name] = annotations
+            elem_results[svg_file.name] = annotations
+        if page_annotation:
+            page_results[svg_file.name] = page_annotation
 
-    return results
+    # Global annotations from live_preview/global_annotations.json
+    global_path = dir_path / 'live_preview' / 'global_annotations.json'
+    global_annotations = []
+    if global_path.is_file():
+        try:
+            with open(global_path, 'r', encoding='utf-8') as fh:
+                data = json.load(fh)
+            if isinstance(data, list):
+                global_annotations = data
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    return elem_results, page_results, global_annotations
 
 
-def print_results(results: dict[str, list[dict]]) -> None:
+def print_results(elem_results: dict[str, list[dict]], page_results: dict[str, str], global_annotations: list[dict]) -> None:
     """Print annotation results in human-readable format."""
-    if not results:
+    global_count = len(global_annotations)
+    page_count = len(page_results)
+    elem_total = sum(len(anns) for anns in elem_results.values())
+    total = elem_total + page_count + global_count
+
+    if total == 0:
         print("[OK] No annotations found.")
         return
 
-    total = sum(len(anns) for anns in results.values())
-    file_count = len(results)
-    ann_word = "annotation" if total == 1 else "annotations"
-    file_word = "file" if file_count == 1 else "files"
-    print(f"Found {total} {ann_word} in {file_count} {file_word}:\n")
+    print(f"Found {total} annotation(s): {elem_total} element, {page_count} page, {global_count} global\n")
 
-    for filename, annotations in results.items():
-        print(f"{filename}")
-        for i, ann in enumerate(annotations, 1):
-            content = f' "{ann["content_preview"]}"' if ann['content_preview'] else ''
-            print(f"  [{i}] <{ann['tag']} id=\"{ann['element_id']}\">{content}")
-            print(f"      → {ann['annotation']}")
+    # Global annotations first
+    if global_annotations:
+        print("═══ Global Annotations (apply to ALL slides) ═══")
+        for i, entry in enumerate(global_annotations):
+            idx = entry.get('index', i)
+            print(f"  [G{idx}] {entry.get('annotation', '')}")
         print()
+
+    # Page annotations
+    if page_results:
+        print("═══ Page-Level Annotations ═══")
+        for filename, annotation in page_results.items():
+            print(f"  {filename}")
+            print(f"    → {annotation}")
+        print()
+
+    # Element annotations
+    if elem_results:
+        print("═══ Element Annotations ═══")
+        for filename, annotations in elem_results.items():
+            print(f"  {filename}")
+            for i, ann in enumerate(annotations, 1):
+                content = f' "{ann["content_preview"]}"' if ann['content_preview'] else ''
+                print(f"    [{i}] <{ann['tag']} id=\"{ann['element_id']}\">{content}")
+                print(f"        → {ann['annotation']}")
+            print()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -114,15 +162,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     if target.is_file() and target.suffix == '.svg':
-        annotations = scan_svg_file(target)
-        results = {target.name: annotations} if annotations else {}
+        annotations, page_annotation = scan_svg_file(target)
+        elem_results = {target.name: annotations} if annotations else {}
+        page_results = {target.name: page_annotation} if page_annotation else {}
+        global_annotations = []
     elif target.is_dir():
-        results = scan_directory(target)
+        elem_results, page_results, global_annotations = scan_directory(target)
     else:
         print(f"Error: Expected a project directory or .svg file, got: {target}", file=sys.stderr)
         return 1
 
-    print_results(results)
+    print_results(elem_results, page_results, global_annotations)
     return 0
 
 

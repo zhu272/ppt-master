@@ -1008,3 +1008,173 @@ input.prop-edit-multi-geo {
     clip: rect(0 0 0 0);
     white-space: nowrap;
 }
+
+/* ======================== PAGE ANNOTATION ======================== */
+#page-annotation-box {
+    border-top: 1px solid #2a2a3e;
+    padding: 12px 16px;
+}
+
+#page-annotation-box .section-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #8888aa;
+    margin-bottom: 10px;
+}
+
+.page-ann-status {
+    font-size: 13px;
+    margin-bottom: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    line-height: 1.5;
+}
+
+.page-ann-status.empty {
+    color: #666;
+    font-style: italic;
+}
+
+.page-ann-status.has-annotation {
+    background: rgba(59, 130, 246, 0.12);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    color: #d0d0e0;
+}
+
+.btn-page-ann {
+    width: 100%;
+    padding: 6px 12px;
+    border: 1px dashed #444466;
+    border-radius: 6px;
+    background: transparent;
+    color: #8888aa;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+}
+
+.btn-page-ann:hover {
+    border-color: #3B82F6;
+    color: #3B82F6;
+    background: rgba(59, 130, 246, 0.05);
+}
+
+#page-annotation-text {
+    width: 100%;
+    min-height: 60px;
+    border-radius: 6px;
+    border: 1px solid #3B82F6;
+    background: #1e1e32;
+    color: #e0e0e0;
+    padding: 8px 10px;
+    font-size: 13px;
+    resize: vertical;
+    margin-bottom: 6px;
+}
+
+#page-annotation-btns {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+#page-annotation-btns button {
+    padding: 5px 12px;
+    border-radius: 5px;
+    border: 1px solid #555;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+#btn-save-page-annotation {
+    background: #3B82F6;
+    color: #fff;
+    border-color: #3B82F6;
+}
+
+#btn-save-page-annotation:hover {
+    background: #2563EB;
+}
+
+#btn-remove-page-annotation {
+    background: transparent;
+    color: #aa8888;
+    border-color: #664444;
+}
+
+#btn-remove-page-annotation:hover {
+    background: rgba(239, 68, 68, 0.15);
+}
+
+/* ======================== GLOBAL ANNOTATIONS ======================== */
+#global-annotation-box {
+    border-top: 1px solid #2a2a3e;
+    padding: 12px 16px;
+}
+
+#global-annotation-box .section-label {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #8888aa;
+    margin-bottom: 10px;
+}
+
+.section-hint {
+    font-weight: 400;
+    text-transform: none;
+    font-size: 11px;
+    color: #666;
+}
+
+.global-annotation-item {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+    border-radius: 6px;
+    margin-bottom: 6px;
+}
+
+.global-ann-text {
+    flex: 1;
+    font-size: 13px;
+    color: #d0d0e0;
+    line-height: 1.5;
+    word-break: break-word;
+}
+
+#global-annotation-text {
+    width: 100%;
+    min-height: 56px;
+    border-radius: 6px;
+    border: 1px solid #F59E0B;
+    background: #1e1e32;
+    color: #e0e0e0;
+    padding: 8px 10px;
+    font-size: 13px;
+    resize: vertical;
+    margin-bottom: 6px;
+}
+
+#btn-add-global-annotation {
+    width: 100%;
+    padding: 6px 12px;
+    border: 1px dashed #F59E0B;
+    border-radius: 6px;
+    background: rgba(245, 158, 11, 0.05);
+    color: #F59E0B;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+}
+
+#btn-add-global-annotation:hover {
+    background: rgba(245, 158, 11, 0.12);
+}

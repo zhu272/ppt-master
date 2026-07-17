@@ -330,11 +330,28 @@
     var navCounterEl      = document.getElementById("nav-counter");
     var navNameEl         = document.getElementById("nav-name");
 
+    // Page annotation DOM refs
+    var pageAnnotationBox     = document.getElementById("page-annotation-box");
+    var pageAnnotationStatus  = document.getElementById("page-annotation-status");
+    var pageAnnotationText    = document.getElementById("page-annotation-text");
+    var pageAnnotationBtns    = document.getElementById("page-annotation-btns");
+    var btnSavePageAnnotation = document.getElementById("btn-save-page-annotation");
+    var btnRemovePageAnnotation = document.getElementById("btn-remove-page-annotation");
+    var btnAddPageAnnotation  = document.getElementById("btn-add-page-annotation");
+
+    // Global annotation DOM refs
+    var globalAnnotationBox   = document.getElementById("global-annotation-box");
+    var globalAnnotationList  = document.getElementById("global-annotations-list");
+    var globalAnnotationText  = document.getElementById("global-annotation-text");
+    var btnAddGlobalAnnotation = document.getElementById("btn-add-global-annotation");
+
     // ---- State ------------------------------------------------------
     var currentSlide      = null;   // filename, e.g. "slide_01.svg"
     var slideNames        = [];     // ordered slide filenames for navigation
     var selectedElementIds = new Set(); // id attrs of selected SVG elements
     var slideAnnotations  = {};     // {element_id: annotation_text} for current slide
+    var slidePageAnnotation = null; // page-level annotation text for current slide
+    var globalAnnotations = [];    // [{index, annotation, ts}, ...] global annotations
     var liveMode          = false;
     var slidePollTimer    = null;
     var pendingModalAction = "submit";
@@ -587,6 +604,7 @@
         currentSlide = name;
         selectedElementIds.clear();
         slideAnnotations = {};
+        slidePageAnnotation = null;
         updateNavLabel();
 
         // Reset right panel and rubber band
@@ -678,10 +696,14 @@
                     slideAnnotations[a.element_id] = a.annotation;
                 });
 
+                // Page-level annotation
+                slidePageAnnotation = data.page_annotation || null;
+
                 editStackCount[name] = data.undo_depth || 0;
                 setupSvgInteraction();
                 refreshAnnotationVisuals();
                 updateAnnotationList();
+                renderPageAnnotationUI();
                 updateUndoButton();
                 updatePendingStatus();
             })
@@ -1617,6 +1639,131 @@
             annotationsEl.appendChild(item);
         });
     }
+
+    // ================================================================
+    //  9b. Page-level annotation
+    // ================================================================
+    function renderPageAnnotationUI() {
+        if (!pageAnnotationBox) return;
+        if (slidePageAnnotation) {
+            pageAnnotationStatus.textContent = slidePageAnnotation;
+            pageAnnotationStatus.className = "page-ann-status has-annotation";
+            pageAnnotationText.style.display = "none";
+            pageAnnotationBtns.style.display = "none";
+            btnAddPageAnnotation.style.display = "none";
+        } else {
+            pageAnnotationStatus.textContent = "暂无整页标注";
+            pageAnnotationStatus.className = "page-ann-status empty";
+            btnAddPageAnnotation.style.display = "";
+            pageAnnotationText.style.display = "none";
+            pageAnnotationBtns.style.display = "none";
+        }
+    }
+
+    if (btnAddPageAnnotation) btnAddPageAnnotation.addEventListener("click", function () {
+        pageAnnotationText.style.display = "";
+        pageAnnotationBtns.style.display = "";
+        btnAddPageAnnotation.style.display = "none";
+        pageAnnotationText.value = slidePageAnnotation || "";
+        pageAnnotationText.focus();
+    });
+
+    if (btnSavePageAnnotation) btnSavePageAnnotation.addEventListener("click", function () {
+        if (!currentSlide) return;
+        var text = pageAnnotationText.value.trim();
+        if (!text) return;
+        fetch("/api/slide/" + encodeURIComponent(currentSlide) + "/page-annotation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ annotation: text })
+        })
+        .then(jsonOrThrow)
+        .then(function () {
+            slidePageAnnotation = text;
+            renderPageAnnotationUI();
+        })
+        .catch(function (err) { console.error("page annotation save:", err); });
+    });
+
+    if (btnRemovePageAnnotation) btnRemovePageAnnotation.addEventListener("click", function () {
+        if (!currentSlide) return;
+        fetch("/api/slide/" + encodeURIComponent(currentSlide) + "/page-annotation", {
+            method: "DELETE"
+        })
+        .then(jsonOrThrow)
+        .then(function () {
+            slidePageAnnotation = null;
+            renderPageAnnotationUI();
+        })
+        .catch(function (err) { console.error("page annotation delete:", err); });
+    });
+
+    // ================================================================
+    //  9c. Global annotations
+    // ================================================================
+    function loadGlobalAnnotations() {
+        fetch("/api/global-annotations")
+            .then(jsonOrThrow)
+            .then(function (data) {
+                globalAnnotations = data.annotations || [];
+                renderGlobalAnnotationsUI();
+            })
+            .catch(function (err) { console.error("load global annotations:", err); });
+    }
+
+    function renderGlobalAnnotationsUI() {
+        if (!globalAnnotationList) return;
+        globalAnnotationList.innerHTML = "";
+        if (globalAnnotations.length === 0) {
+            globalAnnotationList.innerHTML = '<div class="annotations-empty">暂无全局标注</div>';
+            return;
+        }
+        globalAnnotations.forEach(function (entry) {
+            var item = document.createElement("div");
+            item.className = "global-annotation-item";
+            var textDiv = document.createElement("div");
+            textDiv.className = "global-ann-text";
+            textDiv.textContent = entry.annotation;
+            item.appendChild(textDiv);
+            var removeBtn = document.createElement("button");
+            removeBtn.className = "ann-remove";
+            removeBtn.innerHTML = "&times;";
+            removeBtn.title = "删除";
+            removeBtn.addEventListener("click", function () {
+                fetch("/api/global-annotations/" + entry.index, { method: "DELETE" })
+                    .then(jsonOrThrow)
+                    .then(function () {
+                        globalAnnotations = globalAnnotations.filter(function (e) {
+                            return e.index !== entry.index;
+                        });
+                        renderGlobalAnnotationsUI();
+                    })
+                    .catch(function (err) { console.error("delete global annotation:", err); });
+            });
+            item.appendChild(removeBtn);
+            globalAnnotationList.appendChild(item);
+        });
+    }
+
+    if (btnAddGlobalAnnotation) btnAddGlobalAnnotation.addEventListener("click", function () {
+        var text = globalAnnotationText.value.trim();
+        if (!text) return;
+        fetch("/api/global-annotations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ annotation: text })
+        })
+        .then(jsonOrThrow)
+        .then(function (data) {
+            globalAnnotations.push(data.entry);
+            globalAnnotationText.value = "";
+            renderGlobalAnnotationsUI();
+        })
+        .catch(function (err) { console.error("add global annotation:", err); });
+    });
+
+    // Load global annotations on startup
+    loadGlobalAnnotations();
 
     // ================================================================
     // 10.  Save all  -- two-step: confirm then save

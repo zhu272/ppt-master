@@ -203,7 +203,7 @@ def promote_tspan_to_text(
 
 
 def parse_annotations(root: ET.Element) -> list[dict]:
-    """Extract all annotations from an SVG element tree."""
+    """Extract all element-level annotations from an SVG element tree."""
     annotations = []
     for elem in root.iter():
         if elem.get('data-edit-target') == 'true':
@@ -213,6 +213,26 @@ def parse_annotations(root: ET.Element) -> list[dict]:
                 'annotation': elem.get('data-edit-annotation', ''),
             })
     return annotations
+
+
+def parse_page_annotation(root: ET.Element) -> str | None:
+    """Extract page-level annotation from the root SVG element, if any."""
+    target = root.get('data-edit-target', '')
+    if target == 'page':
+        return root.get('data-edit-annotation') or None
+    return None
+
+
+def set_page_annotation(root: ET.Element, annotation: str) -> None:
+    """Set a page-level annotation on the root SVG element."""
+    root.set('data-edit-target', 'page')
+    root.set('data-edit-annotation', annotation)
+
+
+def remove_page_annotation(root: ET.Element) -> None:
+    """Remove page-level annotation from the root SVG element."""
+    root.attrib.pop('data-edit-target', None)
+    root.attrib.pop('data-edit-annotation', None)
 
 
 def set_annotation(root: ET.Element, element_id: str, annotation: str) -> bool:
@@ -338,3 +358,62 @@ def strip_unused_temp_ids(root: ET.Element, keep_ids: set) -> None:
         eid = elem.get('id', '')
         if eid.startswith('_edit_') and eid not in protected:
             elem.attrib.pop('id', None)
+
+
+# ---------------------------------------------------------------------------
+# Global annotations — stored in live_preview/global_annotations.json
+# ---------------------------------------------------------------------------
+
+import json
+import time
+
+
+def _global_annotations_path(project_path) -> 'Path':
+    from pathlib import Path as _Path
+    return _Path(project_path) / 'live_preview' / 'global_annotations.json'
+
+
+def load_global_annotations(project_path) -> list[dict]:
+    """Return the list of global annotations, newest last."""
+    path = _global_annotations_path(project_path)
+    if not path.is_file():
+        return []
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def save_global_annotations(project_path, entries: list[dict]) -> None:
+    """Persist the global annotation list."""
+    path = _global_annotations_path(project_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as fh:
+        json.dump(entries, fh, ensure_ascii=False, indent=2)
+
+
+def add_global_annotation(project_path, annotation: str) -> dict:
+    """Add a global annotation and return the created entry."""
+    entries = load_global_annotations(project_path)
+    entry = {
+        'index': max((e.get('index', -1) for e in entries), default=-1) + 1,
+        'annotation': annotation,
+        'ts': time.time(),
+    }
+    entries.append(entry)
+    save_global_annotations(project_path, entries)
+    return entry
+
+
+def remove_global_annotation(project_path, index: int) -> bool:
+    """Remove a global annotation by index. Returns True if found and removed."""
+    entries = load_global_annotations(project_path)
+    new_entries = [e for e in entries if e.get('index') != index]
+    if len(new_entries) == len(entries):
+        return False
+    save_global_annotations(project_path, new_entries)
+    return True

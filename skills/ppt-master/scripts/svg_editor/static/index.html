@@ -45,6 +45,17 @@
                 <div id="selected-element" class="empty" data-i18n="empty_selected_element">Click an element on the slide to select it</div>
                 <div id="element-props" style="display:none;"></div>
             </div>
+            <!-- Page-level annotation -->
+            <div id="page-annotation-box">
+                <div class="section-label">📄 整页标注</div>
+                <div id="page-annotation-status" class="page-ann-status empty">暂无整页标注</div>
+                <textarea id="page-annotation-text" placeholder="描述整页需要修改的地方..." style="display:none;"></textarea>
+                <div id="page-annotation-btns" style="display:none;">
+                    <button id="btn-save-page-annotation">保存</button>
+                    <button id="btn-remove-page-annotation" class="btn-undo">删除</button>
+                </div>
+                <button id="btn-add-page-annotation" class="btn-page-ann">+ 添加整页标注</button>
+            </div>
             <div id="annotation-input" style="display:none;">
                 <div class="section-label" data-i18n="label_edit_instruction">Edit instruction</div>
                 <div id="annotation-quick-actions"></div>
@@ -54,6 +65,13 @@
             <div id="annotation-list">
                 <div class="section-label" data-i18n="label_annotations_on_slide">Annotations on this slide</div>
                 <div id="annotations"></div>
+            </div>
+            <!-- Global annotations -->
+            <div id="global-annotation-box">
+                <div class="section-label">🌐 全局标注 <span class="section-hint">（应用到所有页面）</span></div>
+                <div id="global-annotations-list"></div>
+                <textarea id="global-annotation-text" placeholder="描述对所有页面统一的修改要求..."></textarea>
+                <button id="btn-add-global-annotation">+ 添加全局标注</button>
             </div>
             <div id="preview-actions">
                 <button id="btn-undo" class="btn-undo" data-i18n="btn_undo" disabled>Undo</button>
